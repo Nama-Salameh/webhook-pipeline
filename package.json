@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -16,5 +17,14 @@
   "bugs": {
     "url": "https://github.com/Nama-Salameh/webhook-pipeline/issues"
   },
-  "homepage": "https://github.com/Nama-Salameh/webhook-pipeline#readme"
+  "homepage": "https://github.com/Nama-Salameh/webhook-pipeline#readme",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
 }
