@@ -1,0 +1,20 @@
+{
+  "name": "webhook-pipeline",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nama-Salameh/webhook-pipeline.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Nama-Salameh/webhook-pipeline/issues"
+  },
+  "homepage": "https://github.com/Nama-Salameh/webhook-pipeline#readme"
+}
