@@ -142,7 +142,7 @@ curl -X POST http://localhost:3000/pipelines \
 # 2. Add a subscriber
 curl -X POST http://localhost:3000/pipelines/1/subscribers \
   -H "Content-Type: application/json" \
-  -d '{"targetUrl": "https://your-endpoint.com/hook"}'
+  -d '{"targetUrl": "http://localhost:4000/test-webhook"}'
 
 # 3. Send a webhook
 curl -X POST http://localhost:3000/webhooks/1 \
@@ -152,6 +152,16 @@ curl -X POST http://localhost:3000/webhooks/1 \
 # 4. Check delivery history
 curl http://localhost:3000/deliveries/pipeline/1
 ```
+
+### Testing Delivery Locally
+
+The worker delivers processed events to subscriber URLs via HTTP POST. To test this locally, run the included test subscriber in a separate terminal:
+
+```bash
+npx tsx test-subscriber.ts
+```
+
+This starts a server on `http://localhost:4000/test-webhook` that logs every received event. Use this URL when creating subscribers during local testing.
 
 ---
 
