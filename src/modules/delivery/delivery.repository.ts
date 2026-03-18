@@ -25,3 +25,18 @@ export const getDeliveriesByEvent = async (eventId: number) => {
   );
   return result.rows;
 };
+
+export const getByPipeline = async (pipelineId: number) => {
+  const result = await pool.query(
+    `
+    SELECT d.*, e.pipeline_id
+    FROM deliveries d
+    JOIN events e ON e.id = d.event_id
+    WHERE e.pipeline_id = $1
+    ORDER BY d.id DESC
+    `,
+    [pipelineId]
+  );
+
+  return result.rows;
+};
