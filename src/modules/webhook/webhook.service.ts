@@ -1,20 +1,14 @@
 import * as repo from "./webhook.repository.js";
-import { CreatePipelineDTO } from "./webhook.types.js";
+import { boss } from "../../queue/boss.js";
+import * as pipelineRepo from "../pipeline/pipeline.repository.js";
 
-export const createPipeline = async (data: CreatePipelineDTO) => {
-  if (!data.name) {
-    throw new Error("Pipeline name required");
-  }
+export const ingestWebhook = async (pipelineId: number, payload: any) => {
+  const pipeline = await pipelineRepo.getPipelineById(pipelineId);
+  if (!pipeline) throw new Error("Pipeline not found");
 
-  const pipeline = await repo.createPipeline(data);
+  const event = await repo.createEvent(pipelineId, payload);
 
-  return {
-    ...pipeline,
-    webhookUrl: `/webhooks/${pipeline.id}`,
-  };
+  await boss.send("process_event", { eventId: event.id });
+
+  return event;
 };
-
-export const listPipelines = () => repo.getPipelines();
-
-export const removePipeline = (id: number) =>
-  repo.deletePipeline(id);
