@@ -40,3 +40,12 @@ export const getByPipeline = async (pipelineId: number) => {
 
   return result.rows;
 };
+
+export const getById = async (id: number) => {
+  const result = await pool.query(
+    `SELECT * FROM deliveries WHERE id=$1`,
+    [id]
+  );
+
+  return result.rows[0];
+};
