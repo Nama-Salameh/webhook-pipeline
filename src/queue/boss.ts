@@ -8,4 +8,9 @@ export const boss = new PgBoss({
 export const startQueue = async () => {
   await boss.start();
   console.log("PgBoss queue started");
+
+  await boss.createQueue("process_event");
+  console.log("Queue 'process_event' created");
+
+  boss.on("error", (err) => console.error("PgBoss error:", err));
 };

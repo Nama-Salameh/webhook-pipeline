@@ -4,25 +4,26 @@ import * as eventRepo from "../modules/webhook/webhook.repository.js";
 import * as pipelineRepo from "../modules/pipeline/pipeline.repository.js";
 
 export const startWorker = () => {
-  boss.work("process_event", async (job: any) => {
-    try {
-      const event = await eventRepo.getEvent(job.data.eventId);
-      if (!event) throw new Error("Event not found");
+  boss.work("process_event", async (jobs: any[]) => {
+    for (const job of jobs) {
+      try {
+        const event = await eventRepo.getEvent(job.data.eventId);
+        if (!event) throw new Error("Event not found");
 
-      const pipeline = await pipelineRepo.getPipelineById(event.pipeline_id);
-      if (!pipeline) throw new Error("Pipeline not found");
+        const pipeline = await pipelineRepo.getPipelineById(event.pipeline_id);
+        if (!pipeline) throw new Error("Pipeline not found");
 
-      const action = getAction(pipeline.action_type);
-      const result = await action.execute(event.payload);
+        const action = getAction(pipeline.action_type);
+        const result = await action.execute(event.payload);
 
-      console.log(
-        `Event ${event.id} processed by pipeline ${pipeline.id}:`,
-        result
-      );
-
-    } catch (err) {
-      console.error("Worker error:", err);
-      throw err;
+        console.log(
+          `Event ${event.id} processed by pipeline ${pipeline.id}:`,
+          result
+        );
+      } catch (err) {
+        console.error("Worker error:", err);
+        throw err;
+      }
     }
   });
 
