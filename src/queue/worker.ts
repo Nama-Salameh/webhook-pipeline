@@ -52,7 +52,7 @@ async function deliverToSubscribers(event: any, subscribers: any[]) {
 
     while (!success && attempt <= 3) {
       try {
-        const res = await axios.post(subscriber.url, event.payload, { timeout: 5000 });
+        const res = await axios.post(subscriber.target_url, event.payload, { timeout: 5000 });
         await createDelivery(event.id, subscriber.id, "success", res.status, JSON.stringify(res.data), attempt);
         success = true;
         console.log(`Delivered event ${event.id} to subscriber ${subscriber.id}`);

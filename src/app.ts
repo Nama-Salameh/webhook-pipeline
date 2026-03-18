@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import pipelineRoutes from "./modules/pipeline/pipeline.routes.js";
 import webhookRoutes from "./modules/webhook/webhook.routes.js";
+import subscriberRoutes from "./modules/subscriber/subscriber.routes.js";
 
 export const app = express();
 
@@ -10,6 +11,7 @@ app.use(express.json());
 
 app.use("/pipelines", pipelineRoutes);
 app.use("/webhooks/:pipelineId", webhookRoutes);
+app.use("/subscribers/:id", subscriberRoutes); 
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
