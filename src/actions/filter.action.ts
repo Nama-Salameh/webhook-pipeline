@@ -1,13 +1,13 @@
 import { Action } from "./action.interface.js";
 export class FilterAction implements Action {
-  async execute(payload: any): Promise<any | null> {
+  async execute(payload: any): Promise<{ skipped?: boolean; payload?: any; reason?: string }> {
     const { field, value } = payload._filter ?? {};
 
     if (field && payload[field] !== value) {
-      return null;
+      return { skipped: true, reason: `${field} !== ${value}` };
     }
 
     const { _filter, ...rest } = payload;
-    return rest;
+    return { payload: rest };
   }
 }
