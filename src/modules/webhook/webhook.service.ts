@@ -12,3 +12,20 @@ export const ingestWebhook = async (pipelineId: number, payload: any) => {
 
   return event;
 };
+
+export const getEventStatus = async (eventId: number) => {
+  const event = await repo.getEventById(eventId);
+  if (!event) throw new Error("Event not found");
+
+  const deliveries = await repo.getDeliveriesByEventId(eventId);
+
+  const successDelivery = deliveries.find(d => d.status === "success");
+  const status = successDelivery ? "success" : deliveries.some(d => d.status === "failed") ? "failed" : "pending";
+
+  return {
+    event,
+    status,
+    attempts: deliveries.length,
+    deliveries
+  };
+};

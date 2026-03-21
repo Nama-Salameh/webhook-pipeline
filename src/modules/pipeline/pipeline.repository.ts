@@ -8,7 +8,7 @@ export const createPipeline = async (data: CreatePipelineDTO) => {
       VALUES ($1, $2)
       RETURNING *
     `,
-    [data.name, data.actionType]
+    [data.name, data.action_type]
   );
 
   return result.rows[0];

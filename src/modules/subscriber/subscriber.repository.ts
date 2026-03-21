@@ -11,7 +11,7 @@ export const createSubscriber = async (
       VALUES ($1, $2)
       RETURNING *
     `,
-    [pipelineId, dto.targetUrl]
+    [pipelineId, dto.target_url]
   );
 
   return result.rows[0];

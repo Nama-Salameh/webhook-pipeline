@@ -6,5 +6,5 @@ export type Subscriber = {
 };
 
 export type CreateSubscriberDTO = {
-  targetUrl: string;
+  target_url: string;
 };

@@ -8,9 +8,15 @@ export const createEvent = async (pipelineId: number, payload: any) => {
   return result.rows[0];
 };
 
-export const getEvent = async (id: number) => {
-  const result = await pool.query(`SELECT * FROM events WHERE id=$1`, [
-    id,
-  ]);
+export const getEventById = async (id: number) => {
+  const result = await pool.query(`SELECT * FROM events WHERE id=$1`, [id]);
   return result.rows[0];
+};
+
+export const getDeliveriesByEventId = async (eventId: number) => {
+  const result = await pool.query(
+    `SELECT * FROM deliveries WHERE event_id=$1 ORDER BY attempt ASC`,
+    [eventId]
+  );
+  return result.rows;
 };

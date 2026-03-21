@@ -10,7 +10,7 @@ export const startWorker = () => {
   boss.work("process_event", async (jobs: any[]) => {
     for (const job of jobs) {
       try {
-        const event = await eventRepo.getEvent(job.data.eventId);
+        const event = await eventRepo.getEventById(job.data.eventId);
         if (!event) throw new Error(`Event not found: ${job.data.eventId}`);
 
         const pipeline = await pipelineRepo.getPipelineById(event.pipeline_id);

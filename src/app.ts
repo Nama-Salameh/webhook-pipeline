@@ -4,6 +4,7 @@ import pipelineRoutes from "./modules/pipeline/pipeline.routes.js";
 import webhookRoutes from "./modules/webhook/webhook.routes.js";
 import subscriberRoutes from "./modules/subscriber/subscriber.routes.js";
 import deliveryRoutes from "./modules/delivery/delivery.routes.js";
+import eventRoutes from "./modules/webhook/event.routes.js";
 
 export const app = express();
 
@@ -12,8 +13,9 @@ app.use(express.json());
 
 app.use("/pipelines", pipelineRoutes);
 app.use("/webhooks/:pipelineId", webhookRoutes);
-app.use("/subscribers/:id", subscriberRoutes); 
+app.use("/pipelines/:pipelineId/subscribers", subscriberRoutes);
 app.use("/deliveries", deliveryRoutes);
+app.use("/events", eventRoutes);
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });

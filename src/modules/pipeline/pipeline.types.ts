@@ -7,5 +7,5 @@ export type Pipeline = {
 
 export type CreatePipelineDTO = {
   name: string;
-  actionType: string;
+  action_type: string;
 };
