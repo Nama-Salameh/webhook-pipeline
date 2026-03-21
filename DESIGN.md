@@ -130,7 +130,22 @@ Webhook payloads are schema-less by nature. JSONB stores them without requiring 
 ### Docker setup
 Multi-stage Dockerfile — the builder stage compiles TypeScript, the final stage copies only compiled output and production dependencies, keeping the image lean. A `docker-entrypoint.sh` runs migrations before starting the server, so `docker compose up --build` is the only command needed to get a fully working environment from scratch.
 
-The compose file has two services: `postgres` (with a healthcheck) and `api` which waits for postgres to be healthy before starting. The worker runs inside the same process as the API server — no separate container needed.
+The compose file has two services: `postgres` (with a healthcheck) and `api` which waits for postgres to be healthy before starting.
+
+### Worker in the same process as the API
+The background worker runs inside the same Node.js process as the Express server — not in a separate container. For this scale, the overhead of a second container (separate image, separate deploy, inter-service networking) isn't justified. pg-boss handles concurrency and job locking at the DB level, so running the worker in-process is safe. Splitting it out would be the right call if the worker became CPU-bound or needed independent scaling.
+
+### webhook.site over local subscriber for testing
+When the API runs inside Docker, `localhost` inside the container refers to the container itself — not the host machine. A local test subscriber on port 4000 is unreachable unless you resolve the host gateway IP, which varies by machine and Docker network configuration.
+
+[webhook.site](https://webhook.site) solves this cleanly — it's a public URL that the container can reach without any networking workarounds. It also provides a visual inspector in the browser, making it easier to verify the exact payload shape delivered by the worker.
+
+| | Local subscriber | webhook.site |
+|---|---|---|
+| Docker networking | ❌ Requires host gateway IP | ✅ No issues |
+| Setup | Extra terminal needed | ✅ Browser only |
+| Debugging | Hard | ✅ Visual inspector |
+| Scope | Local only | ✅ Public internet |
 
 ---
 
@@ -151,7 +166,11 @@ Skips delivery entirely if a field condition isn't met. This is the most practic
 
 ## Retry Logic
 
-Delivery is attempted up to 3 times per subscriber. On each failure, the worker waits `2000ms × attempt` before retrying (exponential backoff). Every attempt — success or failure — is written to the `deliveries` table with the HTTP status code and response body. This gives full observability into what happened without needing external logging infrastructure.
+Delivery is attempted up to 3 times per subscriber with exponential backoff (`2000ms × attempt`). Every attempt — success or failure — is written to the `deliveries` table with the HTTP status code and response body.
+
+**Why retry?** Subscriber endpoints can fail transiently — a deploy, a timeout, a momentary overload. Without retries, a single blip causes permanent data loss. Retrying gives the subscriber a chance to recover.
+
+**Why exponential backoff?** Retrying immediately after a failure often hits the same problem again. Spacing retries with increasing delays gives the failing service time to recover, and avoids hammering an already-struggling endpoint — which would make the situation worse. This is the same pattern used by every major message queue and HTTP client library.
 
 ---
 

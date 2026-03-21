@@ -1,15 +1,36 @@
 # Webhook Processing Pipeline
 
-A service that receives webhooks, processes them through a job queue, and delivers results to registered subscriber URLs.
+![CI](https://github.com/Nama-Salameh/webhook-pipeline/actions/workflows/ci.yml/badge.svg)
+![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker)
+![Node](https://img.shields.io/badge/node-22-green?logo=node.js)
+![TypeScript](https://img.shields.io/badge/typescript-5-blue?logo=typescript)
+![PostgreSQL](https://img.shields.io/badge/postgresql-16-blue?logo=postgresql)
+
+A service that receives webhooks, processes them through a job queue, and delivers results to registered subscriber URLs — a simplified Zapier-style pipeline engine.
+
+---
+
+## How It Works
+
+```
+Incoming webhook → queued as a job → worker processes it → delivers to subscribers
+```
+
+1. A webhook hits `POST /webhooks/:pipelineId`
+2. The payload is saved to the DB and queued via pg-boss — the HTTP response returns immediately
+3. The background worker picks up the job, runs the pipeline's action on the payload
+4. The result is POSTed to every subscriber URL registered on that pipeline
+5. Each delivery is recorded with status, response code, and attempt number
+6. Failed deliveries are retried up to 3 times with exponential backoff
 
 ---
 
 ## Tech Stack
 
 - TypeScript + Express
-- PostgreSQL + pg-boss
+- PostgreSQL + pg-boss (job queue)
 - Docker + Docker Compose
-- GitHub Actions
+- GitHub Actions CI/CD
 
 ---
 
@@ -18,25 +39,23 @@ A service that receives webhooks, processes them through a job queue, and delive
 ### Prerequisites
 
 - Docker Desktop (or Docker Engine on Linux/WSL)
-- Node.js 20+
 
-### Setup
+### Run with Docker
 
 ```bash
-# Clone the repo
 git clone https://github.com/Nama-Salameh/webhook-pipeline.git
 cd webhook-pipeline
 
-# Start everything — DB, migrations, and server
 docker compose up --build
 ```
 
-Server runs on `http://localhost:3000`.
+Server runs on `http://localhost:3000`. Migrations run automatically on startup.
 
-**Local development (without Docker):**
+### Local Development (without Docker)
+
 ```bash
 cp .env.example .env
-docker compose up -d postgres   # start only the DB
+docker compose up -d postgres
 npm install
 npm run migrate
 npm run dev
@@ -46,10 +65,11 @@ npm run dev
 
 ## Environment Variables
 
-| Variable       | Description               | Default                                               |
-|----------------|---------------------------|-------------------------------------------------------|
-| `PORT`         | Server port               | `3000`                                                |
-| `DATABASE_URL` | PostgreSQL connection URL | `postgres://postgres:postgres@localhost:5432/webhook` |
+| Variable          | Description               | Default                                               |
+|-------------------|---------------------------|-------------------------------------------------------|
+| `PORT`            | Server port               | `3000`                                                |
+| `DATABASE_URL`    | PostgreSQL connection URL | `postgres://postgres:postgres@localhost:5432/webhook` |
+| `RUN_MIGRATIONS`  | Run migrations on startup | `true`                                                |
 
 ---
 
@@ -74,7 +94,7 @@ GET /health
 POST /pipelines
 {
   "name": "My Pipeline",
-  "actionType": "transformKeys"
+  "action_type": "addTimestamp"
 }
 ```
 
@@ -84,15 +104,19 @@ Action types: `addTimestamp`, `transformKeys`, `filter`
 
 ```
 POST /webhooks/:pipelineId
+→ { "received": true, "eventId": 1 }
 ```
 
-Ingests an event and queues it for background processing.
+Ingests a webhook and queues it for background processing. Returns immediately.
 
 ```json
+// addTimestamp — appends processedAt to the payload
+{ "name": "test", "value": 123 }
+
 // transformKeys — renames fields using _keyMap
 {
   "orderId": 1234,
-  "customer": "Namaa",
+  "customer": "test",
   "_keyMap": { "orderId": "order_id" }
 }
 
@@ -106,18 +130,27 @@ Ingests an event and queues it for background processing.
 
 ### Subscribers
 
-| Method | Endpoint                                  | Description           |
-|--------|-------------------------------------------|-----------------------|
-| POST   | `/pipelines/:pipelineId/subscribers`      | Add a subscriber      |
-| GET    | `/pipelines/:pipelineId/subscribers`      | List subscribers      |
-| DELETE | `/pipelines/:pipelineId/subscribers/:id`  | Remove a subscriber   |
+| Method | Endpoint                                 | Description         |
+|--------|------------------------------------------|---------------------|
+| POST   | `/pipelines/:pipelineId/subscribers`     | Add a subscriber    |
+| GET    | `/pipelines/:pipelineId/subscribers`     | List subscribers    |
+| DELETE | `/pipelines/:pipelineId/subscribers/:id` | Remove a subscriber |
 
 ```json
 POST /pipelines/1/subscribers
 {
-  "targetUrl": "https://your-endpoint.com/hook"
+  "target_url": "https://webhook.site/your-unique-id"
 }
 ```
+
+### Events
+
+```
+GET /events/:id/status
+→ { event, status, attempts, deliveries }
+```
+
+Returns the event, its computed status (`pending` / `success` / `failed`), and the full delivery history.
 
 ### Deliveries
 
@@ -130,44 +163,44 @@ POST /pipelines/1/subscribers
 
 ## End-to-End Example
 
+**Get a free test URL:**
+1. Go to [webhook.site](https://webhook.site)
+2. A unique URL appears automatically — e.g. `https://webhook.site/a1b2c3d4-5678-...`
+3. Copy it and use it as `target_url` — no signup needed
+
 ```bash
 # 1. Create a pipeline
 curl -X POST http://localhost:3000/pipelines \
   -H "Content-Type: application/json" \
-  -d '{"name": "Order Pipeline", "actionType": "filter"}'
+  -d '{"name": "Order Pipeline", "action_type": "addTimestamp"}'
 
-# 2. Add a subscriber
+# 2. Add a subscriber (paste your webhook.site URL)
 curl -X POST http://localhost:3000/pipelines/1/subscribers \
   -H "Content-Type: application/json" \
-  -d '{"targetUrl": "http://localhost:4000/test-webhook"}'
+  -d '{"target_url": "https://webhook.site/your-unique-id"}'
 
 # 3. Send a webhook
 curl -X POST http://localhost:3000/webhooks/1 \
   -H "Content-Type: application/json" \
-  -d '{"orderId": 99, "status": "paid", "_filter": {"field": "status", "value": "paid"}}'
+  -d '{"name": "test", "value": 123}'
 
-# 4. Check delivery history
+# 4. Check event status (use eventId from step 3)
+curl http://localhost:3000/events/1/status
+
+# 5. Check full delivery history
 curl http://localhost:3000/deliveries/pipeline/1
 ```
 
-### Testing Delivery Locally
-
-The worker delivers processed events to subscriber URLs via HTTP POST. To test this locally, run the included test subscriber in a separate terminal:
-
-```bash
-npx tsx test-subscriber.ts
-```
-
-This starts a server on `http://localhost:4000/test-webhook` that logs every received event. Use this URL when creating subscribers during local testing.
+The webhook.site dashboard shows the received payload with `processedAt` added by the action.
 
 ---
 
 ## CI/CD
 
-GitHub Actions runs on every push — installs dependencies, type checks, and runs tests.
+GitHub Actions runs on every push — type checks and builds the project against Node 22 with a live PostgreSQL service container.
 
 ---
 
-## Design
+## Architecture & Design Decisions
 
-For architecture decisions, schema design, and trade-offs see [DESIGN.md](./DESIGN.md).
+For schema design, technology choices, action design, retry logic rationale, and trade-offs see [DESIGN.md](./DESIGN.md).
