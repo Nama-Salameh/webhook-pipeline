@@ -1,8 +1,6 @@
-version: '3.9'
-
 services:
-  db:
-    image: postgres:15
+  postgres:
+    image: postgres:16-alpine
     container_name: webhook-db
     environment:
       POSTGRES_USER: postgres
@@ -11,8 +9,27 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-    restart: always
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    container_name: webhook-app
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/webhook
+      PORT: 3000
+      NODE_ENV: development
+      RUN_MIGRATIONS: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
-  pgdata:
+  postgres_data:

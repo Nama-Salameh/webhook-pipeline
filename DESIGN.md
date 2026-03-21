@@ -127,6 +127,11 @@ Built-in `timeout` support is the key reason. Without a timeout, a slow subscrib
 ### JSONB for payloads
 Webhook payloads are schema-less by nature. JSONB stores them without requiring a fixed schema, supports GIN indexing for future querying, and allows the application to work with the data as a plain object without any deserialization step.
 
+### Docker setup
+Multi-stage Dockerfile — the builder stage compiles TypeScript, the final stage copies only compiled output and production dependencies, keeping the image lean. A `docker-entrypoint.sh` runs migrations before starting the server, so `docker compose up --build` is the only command needed to get a fully working environment from scratch.
+
+The compose file has two services: `postgres` (with a healthcheck) and `api` which waits for postgres to be healthy before starting. The worker runs inside the same process as the API server — no separate container needed.
+
 ---
 
 ## Action Design

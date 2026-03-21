@@ -23,27 +23,24 @@ A service that receives webhooks, processes them through a job queue, and delive
 ### Setup
 
 ```bash
-# 1. Clone the repo
+# Clone the repo
 git clone https://github.com/Nama-Salameh/webhook-pipeline.git
 cd webhook-pipeline
 
-# 2. Copy env file
-cp .env.example .env
-
-# 3. Start the database
-docker compose up -d
-
-# 4. Run migrations
-npm run migrate
-
-# 5. Install dependencies and start the server
-npm install
-npm run dev
+# Start everything — DB, migrations, and server
+docker compose up --build
 ```
 
 Server runs on `http://localhost:3000`.
 
-> On Windows, run inside WSL for best compatibility.
+**Local development (without Docker):**
+```bash
+cp .env.example .env
+docker compose up -d postgres   # start only the DB
+npm install
+npm run migrate
+npm run dev
+```
 
 ---
 
