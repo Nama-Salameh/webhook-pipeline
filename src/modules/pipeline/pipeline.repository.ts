@@ -41,3 +41,11 @@ export const updatePipeline = async (id: number, data: Partial<CreatePipelineDTO
   );
   return result.rows[0];
 };
+
+export const togglePipeline = async (id: number, enabled: boolean) => {
+  const result = await pool.query(
+    `UPDATE pipelines SET enabled = $1 WHERE id = $2 RETURNING *`,
+    [enabled, id]
+  );
+  return result.rows[0];
+};

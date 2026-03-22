@@ -84,11 +84,13 @@ GET /health
 
 ### Pipelines
 
-| Method | Endpoint         | Description        |
-|--------|------------------|--------------------|
-| POST   | `/pipelines`     | Create a pipeline  |
-| GET    | `/pipelines`     | List all pipelines |
-| DELETE | `/pipelines/:id` | Delete a pipeline  |
+| Method | Endpoint         | Description             |
+|--------|------------------|-------------------------|
+| POST   | `/pipelines`     | Create a pipeline       |
+| GET    | `/pipelines`     | List all pipelines      |
+| PUT    | `/pipelines/:id` | Update a pipeline       |
+| PATCH  | `/pipelines/:id/toggle` | Enable/disable a pipeline |
+| DELETE | `/pipelines/:id` | Delete a pipeline       |
 
 ```json
 POST /pipelines

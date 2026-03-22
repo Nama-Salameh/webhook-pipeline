@@ -15,6 +15,10 @@ export const startWorker = () => {
 
         const pipeline = await pipelineRepo.getPipelineById(event.pipeline_id);
         if (!pipeline) throw new Error(`Pipeline not found: ${event.pipeline_id}`);
+        if (!pipeline.enabled) {
+          console.log(`Pipeline ${pipeline.id} is disabled, skipping event ${event.id}`);
+          continue;
+        }
 
         const action = getAction(pipeline.action_type, pipeline.action_options ?? {});
         const result = await action.execute(event.payload);

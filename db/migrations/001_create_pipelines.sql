@@ -3,5 +3,6 @@ CREATE TABLE pipelines (
   name TEXT NOT NULL,
   action_type TEXT NOT NULL,
   action_options JSONB DEFAULT '{}',
+  enabled BOOLEAN DEFAULT true,
   created_at TIMESTAMP DEFAULT NOW()
 );

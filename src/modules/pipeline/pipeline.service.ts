@@ -27,3 +27,9 @@ export const updatePipeline = async (id: number, data: Partial<CreatePipelineDTO
   const updated = await repo.updatePipeline(id, data);
   return updated;
 };
+
+export const togglePipeline = async (id: number) => {
+  const pipeline = await repo.getPipelineById(id);
+  if (!pipeline) throw new Error("Pipeline not found");
+  return repo.togglePipeline(id, !pipeline.enabled);
+};

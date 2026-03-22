@@ -37,3 +37,12 @@ export const updatePipeline = async (req: Request, res: Response) => {
     res.status(400).json({ error: err.message });
   }
 };
+
+export const togglePipeline = async (req: Request, res: Response) => {
+  try {
+    const pipeline = await service.togglePipeline(Number(req.params.id));
+    res.json(pipeline);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+};
