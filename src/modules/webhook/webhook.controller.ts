@@ -1,22 +1,17 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import * as service from "./webhook.service.js";
 
-export const receiveWebhook = async (req: Request, res: Response) => {
+export const receiveWebhook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const pipelineId = Number(req.params.pipelineId);
     const event = await service.ingestWebhook(pipelineId, req.body);
     res.json({ received: true, eventId: event.id });
-  } catch (err: any) {
-    res.status(400).json({ error: err.message });
-  }
+  } catch (err) { next(err); }
 };
 
-export const getEventStatus = async (req: Request, res: Response) => {
-  const eventId = Number(req.params.id);
+export const getEventStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const data = await service.getEventStatus(eventId);
+    const data = await service.getEventStatus(Number(req.params.id));
     res.json(data);
-  } catch (err: any) {
-    res.status(404).json({ error: err.message });
-  }
+  } catch (err) { next(err); }
 };
