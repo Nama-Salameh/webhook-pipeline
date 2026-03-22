@@ -197,6 +197,13 @@ GET /events/:id/status
 
 Returns the event, its computed status (`pending` / `success` / `failed`), and the full delivery history.
 
+### Metrics
+
+```
+GET /metrics
+→ { total_events, success_deliveries, failed_deliveries, retries, avg_response_time_ms }
+```
+
 ### Deliveries
 
 | Method | Endpoint                           | Description                    |

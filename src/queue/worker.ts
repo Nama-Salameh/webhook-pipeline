@@ -6,6 +6,7 @@ import { createDelivery } from "../modules/delivery/delivery.repository.js";
 import * as subscriberRepo from "../modules/subscriber/subscriber.repository.js";
 import axios from "axios";
 import { checkRateLimit } from "../utils/rateLimiter.js";
+import { recordEvent, recordSuccess, recordFailure, recordRetry } from "../metrics/metrics.js";
 
 export const startWorker = () => {
   boss.work("process_event", async (jobs: any[]) => {
@@ -13,6 +14,8 @@ export const startWorker = () => {
       try {
         const event = await eventRepo.getEventById(job.data.eventId);
         if (!event) throw new Error(`Event not found: ${job.data.eventId}`);
+
+        recordEvent();
 
         const pipeline = await pipelineRepo.getPipelineById(event.pipeline_id);
         if (!pipeline) throw new Error(`Pipeline not found: ${event.pipeline_id}`);
@@ -33,11 +36,7 @@ export const startWorker = () => {
 
         const subscribers = await subscriberRepo.getSubscribersByPipeline(pipeline.id);
         if (subscribers.length > 0) {
-          await deliverToSubscribers(
-            { ...event, payload: finalPayload },
-            subscribers,
-            pipeline
-          );
+          await deliverToSubscribers({ ...event, payload: finalPayload }, subscribers, pipeline);
         }
 
       } catch (err) {
@@ -70,23 +69,18 @@ async function deliverToSubscribers(event: any, subscribers: any[], pipeline: an
     while (!success && attempt <= maxRetries)
       try {
         const { signature, ...payloadWithoutSignature } = event.payload;
+        const headers: any = { "Content-Type": "application/json" };
+        if (signature) headers["X-Webhook-Signature"] = signature;
 
-        const headers: any = {
-          "Content-Type": "application/json",
-        };
-
-        if (signature) {
-          headers["X-Webhook-Signature"] = signature;
-        }
-
-        const res = await axios.post(subscriber.target_url, payloadWithoutSignature, {
-          timeout,
-          headers,
-        });
+        const start = Date.now();
+        const res = await axios.post(subscriber.target_url, payloadWithoutSignature, { timeout, headers });
+        recordSuccess(Date.now() - start);
         await createDelivery(event.id, subscriber.id, "success", res.status, JSON.stringify(res.data), attempt);
         success = true;
         console.log(`Delivered event ${event.id} to subscriber ${subscriber.id}`);
       } catch (err: any) {
+        recordFailure();
+        if (attempt < maxRetries) recordRetry();
         await createDelivery(event.id, subscriber.id, "failed", err.response?.status, err.message, attempt);
         attempt++;
         await new Promise(r => setTimeout(r, 2000 * attempt));

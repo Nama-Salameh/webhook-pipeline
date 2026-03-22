@@ -192,6 +192,20 @@ This prevents a single slow or misbehaving subscriber from being hammered during
 
 ---
 
+## Metrics
+
+In-memory metrics are tracked per process and exposed via `GET /metrics`:
+
+- `total_events` — events picked up by the worker
+- `success_deliveries` — successful HTTP deliveries
+- `failed_deliveries` — failed delivery attempts
+- `retries` — retry attempts made
+- `avg_response_time_ms` — average delivery response time
+
+Metrics reset on server restart. For production, these would be persisted to a time-series store (e.g. Prometheus + Grafana).
+
+---
+
 ## Trade-offs and Limitations
 
 - **Single action per pipeline** — supporting chained actions would require a `pipeline_steps` table and sequential execution. Kept simple intentionally.
