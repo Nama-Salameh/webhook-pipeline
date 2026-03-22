@@ -27,3 +27,13 @@ export const remove = async (req: Request, res: Response) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+export const updatePipeline = async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  try {
+    const updated = await service.updatePipeline(id, req.body);
+    res.json(updated);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+};

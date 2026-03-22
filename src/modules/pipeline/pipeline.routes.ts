@@ -4,6 +4,7 @@ import * as controller from "./pipeline.controller.js";
 const router = Router();
 
 router.post("/", controller.create);
+router.put("/:id", controller.updatePipeline);
 router.get("/", controller.list);
 router.delete("/:id", controller.remove);
 

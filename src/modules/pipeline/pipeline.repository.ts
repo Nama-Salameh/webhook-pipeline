@@ -34,3 +34,30 @@ export const getPipelineById = async (id: number) => {
 export const deletePipeline = async (id: number) => {
   await pool.query(`DELETE FROM pipelines WHERE id = $1`, [id]);
 };
+
+export const updatePipeline = async (id: number, data: Partial<CreatePipelineDTO>) => {
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  if (data.name) {
+    fields.push(`name = $${fields.length + 1}`);
+    values.push(data.name);
+  }
+
+  if (data.action_type) {
+    fields.push(`action_type = $${fields.length + 1}`);
+    values.push(data.action_type);
+  }
+
+  if (fields.length === 0) {
+    throw new Error("No fields to update");
+  }
+
+  values.push(id);
+  const result = await pool.query(
+    `UPDATE pipelines SET ${fields.join(", ")} WHERE id = $${values.length} RETURNING *`,
+    values
+  );
+
+  return result.rows[0];
+};
