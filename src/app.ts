@@ -7,6 +7,7 @@ import deliveryRoutes from "./modules/delivery/delivery.routes.js";
 import eventRoutes from "./modules/webhook/event.routes.js";
 import metricsRoutes from "./modules/metrics/metrics.routes.js";
 import { requireApiKey } from "./middleware/auth.js";
+import { errorHandler } from "./middleware/error.js";
 
 export const app = express();
 
@@ -24,7 +25,4 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
 
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(err);
-  res.status(500).json({ error: err.message ?? "Internal server error" });
-});
+app.use(errorHandler);

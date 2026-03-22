@@ -1,5 +1,6 @@
 import { pool } from "../../config/database.js";
 import { CreatePipelineDTO } from "./pipeline.types.js";
+import { ValidationError } from "../../middleware/error.js";
 
 export const createPipeline = async (data: CreatePipelineDTO) => {
   const result = await pool.query(
@@ -32,7 +33,7 @@ export const updatePipeline = async (id: number, data: Partial<CreatePipelineDTO
   if (data.action_type)    { fields.push(`action_type = $${fields.length + 1}`);    values.push(data.action_type); }
   if (data.action_options) { fields.push(`action_options = $${fields.length + 1}`); values.push(JSON.stringify(data.action_options)); }
 
-  if (fields.length === 0) throw new Error("No fields to update");
+  if (fields.length === 0) throw new ValidationError("No fields to update");
 
   values.push(id);
   const result = await pool.query(
