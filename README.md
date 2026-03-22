@@ -84,13 +84,14 @@ GET /health
 
 ### Pipelines
 
-| Method | Endpoint         | Description             |
-|--------|------------------|-------------------------|
-| POST   | `/pipelines`     | Create a pipeline       |
-| GET    | `/pipelines`     | List all pipelines      |
-| PUT    | `/pipelines/:id` | Update a pipeline       |
-| PATCH  | `/pipelines/:id/toggle` | Enable/disable a pipeline |
-| DELETE | `/pipelines/:id` | Delete a pipeline       |
+| Method | Endpoint                  | Description                    |
+|--------|---------------------------|--------------------------------|
+| POST   | `/pipelines`              | Create a pipeline              |
+| GET    | `/pipelines`              | List all pipelines             |
+| PUT    | `/pipelines/:id`          | Update a pipeline              |
+| PATCH  | `/pipelines/:id/toggle`   | Enable/disable a pipeline      |
+| GET    | `/pipelines/:id/metrics`  | Get metrics for a pipeline     |
+| DELETE | `/pipelines/:id`          | Delete a pipeline              |
 
 ```json
 POST /pipelines
@@ -199,9 +200,28 @@ Returns the event, its computed status (`pending` / `success` / `failed`), and t
 
 ### Metrics
 
+System-wide metrics (in-memory, resets on restart):
 ```
 GET /metrics
-→ { total_events, success_deliveries, failed_deliveries, retries, avg_response_time_ms }
+→ {
+    "total_events": 42,
+    "success_deliveries": 38,
+    "failed_deliveries": 4,
+    "retries": 3,
+    "avg_response_time_ms": 142
+  }
+```
+
+Per-pipeline metrics (live from DB, always accurate):
+```
+GET /pipelines/:id/metrics
+→ {
+    "pipeline_id": 1,
+    "total_events": "12",
+    "success": "10",
+    "failed": "2",
+    "avg_response_time_ms": "118"
+  }
 ```
 
 ### Deliveries

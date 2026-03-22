@@ -33,3 +33,5 @@ export const togglePipeline = async (id: number) => {
   if (!pipeline) throw new Error("Pipeline not found");
   return repo.togglePipeline(id, !pipeline.enabled);
 };
+
+export const getPipelineMetrics = (id: number) => repo.getPipelineMetrics(id);

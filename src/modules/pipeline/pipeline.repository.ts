@@ -49,3 +49,18 @@ export const togglePipeline = async (id: number, enabled: boolean) => {
   );
   return result.rows[0];
 };
+
+export const getPipelineMetrics = async (pipelineId: number) => {
+  const result = await pool.query(
+    `SELECT
+      COUNT(DISTINCT e.id) as total_events,
+      COUNT(*) FILTER (WHERE d.status = 'success') as success,
+      COUNT(*) FILTER (WHERE d.status = 'failed') as failed,
+      COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (d.last_attempt - e.created_at)) * 1000)), 0) as avg_response_time_ms
+     FROM events e
+     LEFT JOIN deliveries d ON d.event_id = e.id
+     WHERE e.pipeline_id = $1`,
+    [pipelineId]
+  );
+  return { pipeline_id: pipelineId, ...result.rows[0] };
+};

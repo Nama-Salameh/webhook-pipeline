@@ -46,3 +46,12 @@ export const togglePipeline = async (req: Request, res: Response) => {
     res.status(400).json({ error: err.message });
   }
 };
+
+export const getPipelineMetrics = async (req: Request, res: Response) => {
+  try {
+    const metrics = await service.getPipelineMetrics(Number(req.params.id));
+    res.json(metrics);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+};

@@ -48,19 +48,26 @@ src/
 ├── config/
 │   ├── database.ts         # pg connection pool
 │   └── env.ts              # Typed environment variables
+├── metrics/
+│   └── metrics.ts          # In-memory metrics store (read by worker, exposed via API)
 ├── modules/
-│   ├── pipeline/           # CRUD — controller, service, repository, routes, types
-│   ├── webhook/            # Ingestion — saves event, enqueues job
+│   ├── pipeline/           # CRUD, toggle, per-pipeline metrics
+│   ├── webhook/            # Ingestion + event status endpoint
 │   ├── subscriber/         # Subscriber management per pipeline
-│   └── delivery/           # Delivery history and manual retry
+│   ├── delivery/           # Delivery history and manual retry
+│   └── metrics/            # GET /metrics controller and routes
 ├── queue/
 │   ├── boss.ts             # pg-boss instance, queue creation, error handling
 │   └── worker.ts           # Job processor, action execution, delivery with retry
-└── actions/
-    ├── action.interface.ts  # execute(payload): Promise<any>
-    ├── addTimeStamp.action.ts
-    ├── transformKeys.action.ts
-    └── filter.action.ts
+├── actions/
+│   ├── action.interface.ts
+│   ├── addTimeStamp.action.ts
+│   ├── transformKeys.action.ts
+│   ├── filter.action.ts
+│   ├── maskSensitive.action.ts
+│   └── addSignature.action.ts
+└── utils/
+    └── rateLimiter.ts      # In-memory token bucket rate limiter
 ```
 
 Each module owns its own controller, service, repository, routes, and types. No module reaches into another module's repository — cross-module data access goes through the service layer.
@@ -194,15 +201,24 @@ This prevents a single slow or misbehaving subscriber from being hammered during
 
 ## Metrics
 
-In-memory metrics are tracked per process and exposed via `GET /metrics`:
+Two levels of metrics are exposed:
 
+**System-wide** (`GET /metrics`) — in-memory counters tracked by the worker process:
 - `total_events` — events picked up by the worker
 - `success_deliveries` — successful HTTP deliveries
 - `failed_deliveries` — failed delivery attempts
 - `retries` — retry attempts made
-- `avg_response_time_ms` — average delivery response time
+- `avg_response_time_ms` — average delivery response time across all pipelines
 
-Metrics reset on server restart. For production, these would be persisted to a time-series store (e.g. Prometheus + Grafana).
+Resets on server restart. For production these would be persisted to a time-series store (Prometheus + Grafana).
+
+**Per-pipeline** (`GET /pipelines/:id/metrics`) — aggregated live from the DB:
+- `total_events` — events processed by this pipeline
+- `success` — successful deliveries
+- `failed` — failed deliveries
+- `avg_response_time_ms` — average time from event creation to delivery attempt
+
+Per-pipeline metrics are always accurate since they query the `events` and `deliveries` tables directly — no reset on restart.
 
 ---
 
