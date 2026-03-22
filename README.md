@@ -102,7 +102,7 @@ POST /pipelines
 
 Action types: `addTimestamp`, `transformKeys`, `filter`, `maskSensitive`, `addSignature`
 
-Some actions accept `action_options` to customize behavior:
+Pipeline options via `action_options`:
 
 ```json
 // maskSensitive with custom fields and mask
@@ -118,7 +118,21 @@ Some actions accept `action_options` to customize behavior:
   "action_type": "addSignature",
   "action_options": { "secret": "my-secret" }
 }
+
+// rate limiting per subscriber (any action type)
+{
+  "name": "Rate Limited Pipeline",
+  "action_type": "addTimestamp",
+  "action_options": { "rate_limit": { "max": 5, "window_ms": 10000 } }
+}
 ```
+
+Pipeline-level delivery config (optional, set at creation):
+
+| Field | Description | Default |
+|---|---|---|
+| `retry_limit` | Max delivery attempts per subscriber | `3` |
+| `timeout_ms` | HTTP timeout per delivery attempt | `5000` |
 
 ### Webhooks
 

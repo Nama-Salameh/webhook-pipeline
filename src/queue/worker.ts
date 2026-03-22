@@ -5,6 +5,7 @@ import * as pipelineRepo from "../modules/pipeline/pipeline.repository.js";
 import { createDelivery } from "../modules/delivery/delivery.repository.js";
 import * as subscriberRepo from "../modules/subscriber/subscriber.repository.js";
 import axios from "axios";
+import { checkRateLimit } from "../utils/rateLimiter.js";
 
 export const startWorker = () => {
   boss.work("process_event", async (jobs: any[]) => {
@@ -30,12 +31,13 @@ export const startWorker = () => {
 
         const finalPayload = result.payload ?? result;
 
-        console.log(`Event ${event.id} processed by pipeline ${pipeline.id}:`, finalPayload);
-
         const subscribers = await subscriberRepo.getSubscribersByPipeline(pipeline.id);
-
         if (subscribers.length > 0) {
-          await deliverToSubscribers({ ...event, payload: finalPayload }, subscribers);
+          await deliverToSubscribers(
+            { ...event, payload: finalPayload },
+            subscribers,
+            pipeline
+          );
         }
 
       } catch (err) {
@@ -48,15 +50,39 @@ export const startWorker = () => {
   console.log("Worker started for process_event jobs");
 };
 
+async function deliverToSubscribers(event: any, subscribers: any[], pipeline: any) {
+  const rateLimit = pipeline.action_options?.rate_limit;
+  const maxRetries = pipeline.retry_limit ?? 3;
+  const timeout = pipeline.timeout_ms ?? 5000;
 
-async function deliverToSubscribers(event: any, subscribers: any[]) {
   for (const subscriber of subscribers) {
+    if (rateLimit) {
+      const allowed = checkRateLimit(`subscriber:${subscriber.id}`, rateLimit.max, rateLimit.window_ms);
+      if (!allowed) {
+        console.log(`Rate limit hit for subscriber ${subscriber.id}, skipping event ${event.id}`);
+        continue;
+      }
+    }
+
     let attempt = 1;
     let success = false;
 
-    while (!success && attempt <= 3) {
+    while (!success && attempt <= maxRetries)
       try {
-        const res = await axios.post(subscriber.target_url, event.payload, { timeout: 5000 });
+        const { signature, ...payloadWithoutSignature } = event.payload;
+
+        const headers: any = {
+          "Content-Type": "application/json",
+        };
+
+        if (signature) {
+          headers["X-Webhook-Signature"] = signature;
+        }
+
+        const res = await axios.post(subscriber.target_url, payloadWithoutSignature, {
+          timeout,
+          headers,
+        });
         await createDelivery(event.id, subscriber.id, "success", res.status, JSON.stringify(res.data), attempt);
         success = true;
         console.log(`Delivered event ${event.id} to subscriber ${subscriber.id}`);
@@ -65,7 +91,6 @@ async function deliverToSubscribers(event: any, subscribers: any[]) {
         attempt++;
         await new Promise(r => setTimeout(r, 2000 * attempt));
       }
-    }
 
     if (!success) console.error(`Failed to deliver event ${event.id} to subscriber ${subscriber.id}`);
   }

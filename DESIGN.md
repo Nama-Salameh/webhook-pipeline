@@ -70,13 +70,16 @@ Each module owns its own controller, service, repository, routes, and types. No 
 ## Database Schema
 
 ### `pipelines`
-| Column         | Type      | Notes                         |
-|----------------|-----------|-------------------------------|
-| id             | SERIAL    | Primary key                   |
-| name           | TEXT      | Pipeline name                 |
-| action_type    | TEXT      | Registered action identifier  |
-| action_options | JSONB     | Action configuration options  |
-| created_at     | TIMESTAMP |                               |
+| Column         | Type      | Notes                                      |
+|----------------|-----------|--------------------------------------------|
+| id             | SERIAL    | Primary key                                |
+| name           | TEXT      | Pipeline name                              |
+| action_type    | TEXT      | Registered action identifier               |
+| action_options | JSONB     | Action config (fields, secret, rate_limit) |
+| enabled        | BOOLEAN   | Whether pipeline accepts events            |
+| retry_limit    | INT       | Max delivery attempts (default 3)          |
+| timeout_ms     | INT       | HTTP timeout per attempt (default 5000ms)  |
+| created_at     | TIMESTAMP |                                            |
 
 ### `subscribers`
 | Column      | Type      | Notes                  |
@@ -167,17 +170,25 @@ Checks a single field condition (`_filter.field === _filter.value`). If the cond
 Replaces known sensitive fields with `***` before delivery. Default masked fields: `password`, `token`, `secret`, `email`, `phone`, `ssn` (case-insensitive match). Prevents credentials from being forwarded to subscriber URLs in plaintext. Customizable via `action_options.fields` and `action_options.mask`.
 
 ### `addSignature`
-Appends a `timestamp` (ISO) and a `signature` field — an HMAC-SHA256 hash of the payload including the timestamp — before delivery. Subscribers can verify the signature using the shared secret to confirm the payload is authentic and hasn't been tampered with. Secret is set via `action_options.secret` or falls back to the `WEBHOOK_SECRET` env var.
+Appends a `timestamp` (ISO) and a `signature` field — an HMAC-SHA256 hash of the payload including the timestamp — before delivery. The signature is then stripped from the payload body and sent as an `X-Webhook-Signature` header instead, which is the standard pattern used by Stripe and GitHub. Subscribers verify the header to confirm authenticity. Secret is set via `action_options.secret` or falls back to the `WEBHOOK_SECRET` env var.
 
 ---
 
 ## Retry Logic
 
-Delivery is attempted up to 3 times per subscriber with exponential backoff (`2000ms × attempt`). Every attempt — success or failure — is written to the `deliveries` table with the HTTP status code and response body.
+Delivery is attempted up to `retry_limit` times per subscriber (default 3) with exponential backoff (`2000ms × attempt`). Both `retry_limit` and `timeout_ms` are configurable per pipeline at creation time. Every attempt — success or failure — is written to the `deliveries` table with the HTTP status code and response body.
 
 **Why retry?** Subscriber endpoints can fail transiently — a deploy, a timeout, a momentary overload. Without retries, a single blip causes permanent data loss. Retrying gives the subscriber a chance to recover.
 
 **Why exponential backoff?** Retrying immediately after a failure often hits the same problem again. Spacing retries with increasing delays gives the failing service time to recover, and avoids hammering an already-struggling endpoint — which would make the situation worse. This is the same pattern used by every major message queue and HTTP client library.
+
+---
+
+## Rate Limiting
+
+Per-subscriber rate limiting is configurable via `action_options.rate_limit` (`max` requests per `window_ms`). Implemented as an in-memory token bucket — no Redis needed. If a subscriber exceeds the limit within the window, the delivery is skipped and logged.
+
+This prevents a single slow or misbehaving subscriber from being hammered during high-volume event bursts.
 
 ---
 
