@@ -70,12 +70,13 @@ Each module owns its own controller, service, repository, routes, and types. No 
 ## Database Schema
 
 ### `pipelines`
-| Column      | Type      | Notes                         |
-|-------------|-----------|-------------------------------|
-| id          | SERIAL    | Primary key                   |
-| name        | TEXT      | Pipeline name                 |
-| action_type | TEXT      | Registered action identifier  |
-| created_at  | TIMESTAMP |                               |
+| Column         | Type      | Notes                         |
+|----------------|-----------|-------------------------------|
+| id             | SERIAL    | Primary key                   |
+| name           | TEXT      | Pipeline name                 |
+| action_type    | TEXT      | Registered action identifier  |
+| action_options | JSONB     | Action configuration options  |
+| created_at     | TIMESTAMP |                               |
 
 ### `subscribers`
 | Column      | Type      | Notes                  |
@@ -154,13 +155,19 @@ When the API runs inside Docker, `localhost` inside the container refers to the 
 Actions implement a single interface: `execute(payload): Promise<any>`. They are stateless, have no dependencies, and are resolved by action type string at runtime. Adding a new action means creating one file and registering it in `index.ts` — nothing else changes.
 
 ### `addTimestamp`
-Appends `processedAt` to the payload. Zero side effects, always succeeds. Useful for auditing and as a baseline example of the action contract.
+Appends `processedAt` (ISO timestamp) to the payload. Zero side effects, always succeeds. Useful for auditing when the event was processed.
 
 ### `transformKeys`
-Renames payload fields using a `_keyMap` passed in the payload. Solves a real and common problem: systems that produce and consume webhooks often use different naming conventions. The caller controls the mapping per-request without any pipeline reconfiguration.
+Renames payload fields using a `_keyMap` passed in the payload. The `_keyMap` key itself is stripped from the output. Solves a common real-world problem: systems that produce and consume webhooks often use different naming conventions. The caller controls the mapping per-request without any pipeline reconfiguration.
 
 ### `filter`
-Skips delivery entirely if a field condition isn't met. This is the most practically useful action — most real pipelines should not forward every event. When skipped, no delivery is attempted and no error is thrown; the worker logs the reason and moves on.
+Checks a single field condition (`_filter.field === _filter.value`). If the condition isn't met, returns `{ skipped: true }` — the worker logs the reason and stops, no delivery is attempted. The `_filter` key is stripped from the forwarded payload when the condition passes.
+
+### `maskSensitive`
+Replaces known sensitive fields with `***` before delivery. Default masked fields: `password`, `token`, `secret`, `email`, `phone`, `ssn` (case-insensitive match). Prevents credentials from being forwarded to subscriber URLs in plaintext. Customizable via `action_options.fields` and `action_options.mask`.
+
+### `addSignature`
+Appends a `timestamp` (ISO) and a `signature` field — an HMAC-SHA256 hash of the payload including the timestamp — before delivery. Subscribers can verify the signature using the shared secret to confirm the payload is authentic and hasn't been tampered with. Secret is set via `action_options.secret` or falls back to the `WEBHOOK_SECRET` env var.
 
 ---
 

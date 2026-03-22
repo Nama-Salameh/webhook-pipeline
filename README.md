@@ -98,7 +98,25 @@ POST /pipelines
 }
 ```
 
-Action types: `addTimestamp`, `transformKeys`, `filter`
+Action types: `addTimestamp`, `transformKeys`, `filter`, `maskSensitive`, `addSignature`
+
+Some actions accept `action_options` to customize behavior:
+
+```json
+// maskSensitive with custom fields and mask
+{
+  "name": "Mask Pipeline",
+  "action_type": "maskSensitive",
+  "action_options": { "fields": ["password", "token"], "mask": "XXXX" }
+}
+
+// addSignature with custom secret
+{
+  "name": "Signature Pipeline",
+  "action_type": "addSignature",
+  "action_options": { "secret": "my-secret" }
+}
+```
 
 ### Webhooks
 
@@ -112,20 +130,31 @@ Ingests a webhook and queues it for background processing. Returns immediately.
 ```json
 // addTimestamp — appends processedAt to the payload
 { "name": "test", "value": 123 }
+// → { "name": "test", "value": 123, "processedAt": "2026-..." }
 
-// transformKeys — renames fields using _keyMap
+// transformKeys — renames fields using _keyMap (stripped from output)
 {
   "orderId": 1234,
   "customer": "test",
   "_keyMap": { "orderId": "order_id" }
 }
+// → { "order_id": 1234, "customer": "test" }
 
-// filter — skips delivery if condition not met
+// filter — skips delivery if field value doesn't match (no delivery recorded)
 {
-  "status": "paid",
-  "amount": 99,
+  "status": "draft",
   "_filter": { "field": "status", "value": "paid" }
 }
+// → skipped (status !== paid)
+
+// maskSensitive — replaces sensitive fields with ***
+// sensitive fields: password, token, secret, email, phone, ssn
+{ "username": "test", "password": "secret123", "email": "test@test.com" }
+// → { "username": "test", "password": "***", "email": "***" }
+
+// addSignature — appends timestamp + HMAC-SHA256 signature
+{ "orderId": 1234, "amount": 99 }
+// → { "orderId": 1234, "amount": 99, "timestamp": "2026-...", "signature": "abc123..." }
 ```
 
 ### Subscribers
@@ -167,6 +196,7 @@ Returns the event, its computed status (`pending` / `success` / `failed`), and t
 1. Go to [webhook.site](https://webhook.site)
 2. A unique URL appears automatically — e.g. `https://webhook.site/a1b2c3d4-5678-...`
 3. Copy it and use it as `target_url` — no signup needed
+4. After sending a webhook, go back to webhook.site — it shows every request received, including headers and full body
 
 ```bash
 # 1. Create a pipeline
