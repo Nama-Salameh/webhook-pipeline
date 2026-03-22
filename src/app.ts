@@ -6,18 +6,19 @@ import subscriberRoutes from "./modules/subscriber/subscriber.routes.js";
 import deliveryRoutes from "./modules/delivery/delivery.routes.js";
 import eventRoutes from "./modules/webhook/event.routes.js";
 import metricsRoutes from "./modules/metrics/metrics.routes.js";
+import { requireApiKey } from "./middleware/auth.js";
 
 export const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-app.use("/pipelines", pipelineRoutes);
+app.use("/pipelines", requireApiKey, pipelineRoutes);
 app.use("/webhooks/:pipelineId", webhookRoutes);
-app.use("/pipelines/:pipelineId/subscribers", subscriberRoutes);
-app.use("/deliveries", deliveryRoutes);
-app.use("/events", eventRoutes);
-app.use("/metrics", metricsRoutes);
+app.use("/pipelines/:pipelineId/subscribers", requireApiKey, subscriberRoutes);
+app.use("/deliveries", requireApiKey, deliveryRoutes);
+app.use("/events", requireApiKey, eventRoutes);
+app.use("/metrics", requireApiKey, metricsRoutes);
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });

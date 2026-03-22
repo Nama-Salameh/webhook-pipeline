@@ -26,6 +26,7 @@ services:
       PORT: 3000
       NODE_ENV: development
       RUN_MIGRATIONS: "true"
+      API_KEY: webhook-secret-123
     depends_on:
       postgres:
         condition: service_healthy

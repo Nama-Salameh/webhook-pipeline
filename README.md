@@ -70,6 +70,7 @@ npm run dev
 | `PORT`            | Server port               | `3000`                                                |
 | `DATABASE_URL`    | PostgreSQL connection URL | `postgres://postgres:postgres@localhost:5432/webhook` |
 | `RUN_MIGRATIONS`  | Run migrations on startup | `true`                                                |
+| `API_KEY`         | API key for auth (optional) | unset (auth disabled if not set)                    |
 
 ---
 
@@ -81,6 +82,8 @@ npm run dev
 GET /health
 → { "status": "ok" }
 ```
+
+> All endpoints except `POST /webhooks/:pipelineId` and `GET /health` require an `x-api-key: webhook-secret-123` header.
 
 ### Pipelines
 
@@ -245,23 +248,27 @@ GET /pipelines/:id/metrics
 # 1. Create a pipeline
 curl -X POST http://localhost:3000/pipelines \
   -H "Content-Type: application/json" \
+  -H "x-api-key: webhook-secret-123" \
   -d '{"name": "Order Pipeline", "action_type": "addTimestamp"}'
 
 # 2. Add a subscriber (paste your webhook.site URL)
 curl -X POST http://localhost:3000/pipelines/1/subscribers \
   -H "Content-Type: application/json" \
+  -H "x-api-key: webhook-secret-123" \
   -d '{"target_url": "https://webhook.site/your-unique-id"}'
 
-# 3. Send a webhook
+# 3. Send a webhook (no auth needed)
 curl -X POST http://localhost:3000/webhooks/1 \
   -H "Content-Type: application/json" \
   -d '{"name": "test", "value": 123}'
 
-# 4. Check event status (use eventId from step 3)
-curl http://localhost:3000/events/1/status
+# 4. Check event status
+curl http://localhost:3000/events/1/status \
+  -H "x-api-key: webhook-secret-123"
 
 # 5. Check full delivery history
-curl http://localhost:3000/deliveries/pipeline/1
+curl http://localhost:3000/deliveries/pipeline/1 \
+  -H "x-api-key: webhook-secret-123"
 ```
 
 The webhook.site dashboard shows the received payload with `processedAt` added by the action.

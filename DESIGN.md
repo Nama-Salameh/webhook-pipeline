@@ -123,6 +123,11 @@ Each module owns its own controller, service, repository, routes, and types. No 
 
 ## Technology Decisions
 
+### Authentication
+API key auth via `x-api-key` header. The key is configured via the `API_KEY` env var. The webhook ingestion endpoint (`POST /webhooks/:pipelineId`) and `GET /health` are intentionally public — the inbound receiver must be reachable without credentials. All management endpoints (pipelines, subscribers, deliveries, metrics, events) require the key.
+
+Simple and sufficient for this scale. Production would use JWT or OAuth2 with scoped tokens per pipeline.
+
 ### Express over NestJS
 Express is minimal and gives full control over structure. NestJS enforces its own conventions and adds significant boilerplate — the overhead isn't justified at this scale. The module structure here is explicit and intentional, not framework-imposed.
 
@@ -226,7 +231,7 @@ Per-pipeline metrics are always accurate since they query the `events` and `deli
 
 - **Single action per pipeline** — supporting chained actions would require a `pipeline_steps` table and sequential execution. Kept simple intentionally.
 - **Inline action config** — `_keyMap` and `_filter` live in the payload, which couples config to the event. A `config JSONB` column on `pipelines` would be cleaner for production.
-- **No authentication** — all endpoints are open. API key middleware would be the first thing to add.
+- **No authentication** — ~~all endpoints are open~~ API key auth is implemented via `x-api-key` header. JWT with scoped tokens would be the production approach.
 - **No webhook signature verification** — HMAC-SHA256 validation on incoming requests would prevent spoofed events.
 - **No dead letter queue** — after 3 failed attempts the delivery is marked failed and stays in the DB. A DLQ with alerting would be the production approach.
 
