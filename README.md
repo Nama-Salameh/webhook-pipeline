@@ -21,7 +21,7 @@ Incoming webhook → queued as a job → worker processes it → delivers to sub
 3. The background worker picks up the job, runs the pipeline's action on the payload
 4. The result is POSTed to every subscriber URL registered on that pipeline
 5. Each delivery is recorded with status, response code, and attempt number
-6. Failed deliveries are retried up to 3 times with exponential backoff
+6. Failed deliveries are retried up to `retry_limit` times (default 3) with exponential backoff
 
 ---
 
@@ -65,12 +65,47 @@ npm run dev
 
 ## Environment Variables
 
-| Variable          | Description               | Default                                               |
-|-------------------|---------------------------|-------------------------------------------------------|
-| `PORT`            | Server port               | `3000`                                                |
-| `DATABASE_URL`    | PostgreSQL connection URL | `postgres://postgres:postgres@localhost:5432/webhook` |
-| `RUN_MIGRATIONS`  | Run migrations on startup | `true`                                                |
-| `API_KEY`         | API key for auth (optional) | unset (auth disabled if not set)                    |
+| Variable         | Description                          | Default                                               |
+|------------------|--------------------------------------|-------------------------------------------------------|
+| `PORT`           | Server port                          | `3000`                                                |
+| `DATABASE_URL`   | PostgreSQL connection URL            | `postgres://postgres:postgres@localhost:5432/webhook` |
+| `RUN_MIGRATIONS` | Run migrations on startup            | `true`                                                |
+| `API_KEY`        | API key for auth (optional)          | unset (auth disabled if not set)                      |
+| `WEBHOOK_SECRET` | HMAC secret for `addSignature` action | `default-secret`                                     |
+
+---
+
+## Authentication
+
+All endpoints except `POST /webhooks/:pipelineId` and `GET /health` require an `x-api-key` header.
+
+```bash
+x-api-key: webhook-secret-123
+```
+
+If `API_KEY` is not set in the environment, authentication is skipped entirely. The webhook ingestion endpoint is intentionally public — it must be reachable without credentials.
+
+Unauthorized requests return:
+```json
+{ "error": "Unauthorized" }
+```
+
+---
+
+## Error Responses
+
+All errors follow a consistent format:
+
+```json
+{ "error": "message describing what went wrong" }
+```
+
+| Status | Meaning                              |
+|--------|--------------------------------------|
+| 400    | Validation error (bad input)         |
+| 401    | Unauthorized (missing/invalid key)   |
+| 404    | Resource not found                   |
+| 500    | Unexpected server error              |
 
 ---
 
@@ -83,18 +118,16 @@ GET /health
 → { "status": "ok" }
 ```
 
-> All endpoints except `POST /webhooks/:pipelineId` and `GET /health` require an `x-api-key: webhook-secret-123` header.
-
 ### Pipelines
 
-| Method | Endpoint                  | Description                    |
-|--------|---------------------------|--------------------------------|
-| POST   | `/pipelines`              | Create a pipeline              |
-| GET    | `/pipelines`              | List all pipelines             |
-| PUT    | `/pipelines/:id`          | Update a pipeline              |
-| PATCH  | `/pipelines/:id/toggle`   | Enable/disable a pipeline      |
-| GET    | `/pipelines/:id/metrics`  | Get metrics for a pipeline     |
-| DELETE | `/pipelines/:id`          | Delete a pipeline              |
+| Method | Endpoint                 | Description               |
+|--------|--------------------------|---------------------------|
+| POST   | `/pipelines`             | Create a pipeline         |
+| GET    | `/pipelines`             | List all pipelines        |
+| PUT    | `/pipelines/:id`         | Update a pipeline         |
+| PATCH  | `/pipelines/:id/toggle`  | Enable/disable a pipeline |
+| GET    | `/pipelines/:id/metrics` | Per-pipeline metrics      |
+| DELETE | `/pipelines/:id`         | Delete a pipeline         |
 
 ```json
 POST /pipelines
@@ -106,24 +139,26 @@ POST /pipelines
 
 Action types: `addTimestamp`, `transformKeys`, `filter`, `maskSensitive`, `addSignature`
 
+An invalid `action_type` returns a `400` error immediately.
+
 Pipeline options via `action_options`:
 
 ```json
-// maskSensitive with custom fields and mask
+// maskSensitive — custom fields and mask string
 {
   "name": "Mask Pipeline",
   "action_type": "maskSensitive",
   "action_options": { "fields": ["password", "token"], "mask": "XXXX" }
 }
 
-// addSignature with custom secret
+// addSignature — custom HMAC secret
 {
   "name": "Signature Pipeline",
   "action_type": "addSignature",
   "action_options": { "secret": "my-secret" }
 }
 
-// rate limiting per subscriber (any action type)
+// rate limiting per subscriber (works with any action type)
 {
   "name": "Rate Limited Pipeline",
   "action_type": "addTimestamp",
@@ -131,12 +166,12 @@ Pipeline options via `action_options`:
 }
 ```
 
-Pipeline-level delivery config (optional, set at creation):
+Pipeline-level delivery config (optional):
 
-| Field | Description | Default |
-|---|---|---|
-| `retry_limit` | Max delivery attempts per subscriber | `3` |
-| `timeout_ms` | HTTP timeout per delivery attempt | `5000` |
+| Field         | Description                          | Default |
+|---------------|--------------------------------------|---------|
+| `retry_limit` | Max delivery attempts per subscriber | `3`     |
+| `timeout_ms`  | HTTP timeout per delivery attempt    | `5000`  |
 
 ### Webhooks
 
@@ -145,36 +180,32 @@ POST /webhooks/:pipelineId
 → { "received": true, "eventId": 1 }
 ```
 
-Ingests a webhook and queues it for background processing. Returns immediately.
+Ingests a webhook and queues it for background processing. Returns immediately. No auth required.
+
+If the pipeline does not exist or is disabled, returns an error immediately.
 
 ```json
-// addTimestamp — appends processedAt to the payload
+// addTimestamp — appends processedAt
 { "name": "test", "value": 123 }
 // → { "name": "test", "value": 123, "processedAt": "2026-..." }
 
 // transformKeys — renames fields using _keyMap (stripped from output)
-{
-  "orderId": 1234,
-  "customer": "test",
-  "_keyMap": { "orderId": "order_id" }
-}
-// → { "order_id": 1234, "customer": "test" }
+{ "orderId": 1234, "_keyMap": { "orderId": "order_id" } }
+// → { "order_id": 1234 }
 
-// filter — skips delivery if field value doesn't match (no delivery recorded)
-{
-  "status": "draft",
-  "_filter": { "field": "status", "value": "paid" }
-}
-// → skipped (status !== paid)
+// filter — skips delivery if field doesn't match
+{ "status": "draft", "_filter": { "field": "status", "value": "paid" } }
+// → skipped (no delivery recorded)
 
 // maskSensitive — replaces sensitive fields with ***
-// sensitive fields: password, token, secret, email, phone, ssn
-{ "username": "test", "password": "secret123", "email": "test@test.com" }
-// → { "username": "test", "password": "***", "email": "***" }
+// default fields: password, token, secret, email, phone, ssn
+{ "username": "test", "password": "secret123" }
+// → { "username": "test", "password": "***" }
 
-// addSignature — appends timestamp + HMAC-SHA256 signature
+// addSignature — HMAC-SHA256 signature sent as X-Webhook-Signature header
 { "orderId": 1234, "amount": 99 }
-// → { "orderId": 1234, "amount": 99, "timestamp": "2026-...", "signature": "abc123..." }
+// → body: { "orderId": 1234, "amount": 99, "timestamp": "2026-..." }
+// → header: X-Webhook-Signature: <hmac-sha256>
 ```
 
 ### Subscribers
@@ -203,7 +234,7 @@ Returns the event, its computed status (`pending` / `success` / `failed`), and t
 
 ### Metrics
 
-System-wide metrics (in-memory, resets on restart):
+System-wide (in-memory, resets on restart):
 ```
 GET /metrics
 → {
@@ -215,7 +246,7 @@ GET /metrics
   }
 ```
 
-Per-pipeline metrics (live from DB, always accurate):
+Per-pipeline (live from DB, persists across restarts):
 ```
 GET /pipelines/:id/metrics
 → {
@@ -240,9 +271,8 @@ GET /pipelines/:id/metrics
 
 **Get a free test URL:**
 1. Go to [webhook.site](https://webhook.site)
-2. A unique URL appears automatically — e.g. `https://webhook.site/a1b2c3d4-5678-...`
-3. Copy it and use it as `target_url` — no signup needed
-4. After sending a webhook, go back to webhook.site — it shows every request received, including headers and full body
+2. Copy the unique URL — e.g. `https://webhook.site/a1b2c3d4-...`
+3. Use it as `target_url` — no signup needed
 
 ```bash
 # 1. Create a pipeline
@@ -251,7 +281,7 @@ curl -X POST http://localhost:3000/pipelines \
   -H "x-api-key: webhook-secret-123" \
   -d '{"name": "Order Pipeline", "action_type": "addTimestamp"}'
 
-# 2. Add a subscriber (paste your webhook.site URL)
+# 2. Add a subscriber
 curl -X POST http://localhost:3000/pipelines/1/subscribers \
   -H "Content-Type: application/json" \
   -H "x-api-key: webhook-secret-123" \
@@ -266,12 +296,18 @@ curl -X POST http://localhost:3000/webhooks/1 \
 curl http://localhost:3000/events/1/status \
   -H "x-api-key: webhook-secret-123"
 
-# 5. Check full delivery history
+# 5. Check delivery history
 curl http://localhost:3000/deliveries/pipeline/1 \
   -H "x-api-key: webhook-secret-123"
-```
 
-The webhook.site dashboard shows the received payload with `processedAt` added by the action.
+# 6. Check system metrics
+curl http://localhost:3000/metrics \
+  -H "x-api-key: webhook-secret-123"
+
+# 7. Check pipeline metrics
+curl http://localhost:3000/pipelines/1/metrics \
+  -H "x-api-key: webhook-secret-123"
+```
 
 ---
 
@@ -283,4 +319,4 @@ GitHub Actions runs on every push — type checks and builds the project against
 
 ## Architecture & Design Decisions
 
-For schema design, technology choices, action design, retry logic rationale, and trade-offs see [DESIGN.md](./DESIGN.md).
+See [DESIGN.md](./DESIGN.md).
