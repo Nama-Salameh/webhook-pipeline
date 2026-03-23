@@ -2,7 +2,7 @@
 
 ## Overview
 
-This service is a simplified event routing system — a webhook hits a pipeline, the payload is transformed by an action, and the result is forwarded to one or more subscriber URLs. The core design principle is reliability: ingestion is always fast, processing is always async, and every failure is recorded and retried.
+A webhook hits a pipeline, the payload is transformed by an action, and the result is forwarded to one or more subscriber URLs. Core principle: ingestion is always fast, processing is always async, every failure is recorded and retried.
 
 ---
 
@@ -10,7 +10,6 @@ This service is a simplified event routing system — a webhook hits a pipeline,
 
 ```
 Client
-  │
   │  POST /webhooks/:pipelineId
   ▼
 Express API
@@ -20,63 +19,71 @@ Express API
   │  4. Return 200 immediately
   ▼
 PostgreSQL
-  │
   ▼
 Background Worker (pg-boss)
-  │  1. Fetch event from DB
-  │  2. Load pipeline → resolve action
-  │  3. Execute action on payload
-  │  4. If skipped → log and stop
-  │  5. Check rate limit per subscriber
-  │  6. POST result to each subscriber URL
-  │  7. Record delivery attempt (success or failed)
-  │  8. Retry up to retry_limit times with exponential backoff
-  │  9. Record metrics on each attempt
+  │  1. Fetch event → load pipeline → resolve action
+  │  2. Execute action on payload
+  │  3. If skipped → log and stop
+  │  4. Check rate limit per subscriber
+  │  5. POST result to each subscriber URL
+  │  6. Record delivery attempt (success or failed)
+  │  7. Retry up to retry_limit times with exponential backoff
+  │  8. Record metrics
   ▼
 Subscriber endpoints
 ```
 
-The API and the worker are decoupled — the HTTP layer never waits for processing or delivery. A slow or unavailable subscriber has zero impact on webhook ingestion.
+Ingestion and delivery are fully decoupled — the API accepts the webhook and returns immediately, the worker handles delivery in the background. If a subscriber is slow or offline, the sender never sees an error and no webhooks are lost.
 
 ---
 
 ## Project Structure
 
 ```
-src/
-├── app.ts                  # Express app, middleware, route registration
-├── server.ts               # Bootstrap: DB check, queue init, http.listen
-├── config/
-│   ├── database.ts         # pg connection pool
-│   └── env.ts              # Typed environment variables
-├── metrics/
-│   └── metrics.ts          # In-memory metrics store (written by worker, read by API)
-├── lib/
-│   └── logger.ts           # Pino logger instance (shared across app and worker)
-├── middleware/
-│   ├── auth.ts             # API key authentication middleware
-│   └── error.ts            # Typed error classes + global error handler
-├── modules/
-│   ├── pipeline/           # CRUD, toggle, per-pipeline metrics
-│   ├── webhook/            # Ingestion endpoint + event status
-│   ├── subscriber/         # Subscriber management per pipeline
-│   ├── delivery/           # Delivery history and manual retry
-│   └── metrics/            # GET /metrics controller and routes
-├── queue/
-│   ├── boss.ts             # pg-boss instance and queue setup
-│   └── worker.ts           # Job processor: action execution, delivery, retry, metrics
-├── actions/
-│   ├── action.interface.ts
-│   ├── addTimeStamp.action.ts
-│   ├── transformKeys.action.ts
-│   ├── filter.action.ts
-│   ├── maskSensitive.action.ts
-│   └── addSignature.action.ts
-└── utils/
-    └── rateLimiter.ts      # In-memory token bucket rate limiter
+webhook-pipeline/
+├── src/                    # Backend source
+│   ├── app.ts              # Express app, middleware, route registration
+│   ├── server.ts           # Bootstrap: DB check, queue init, http.listen
+│   ├── config/
+│   │   ├── database.ts     # pg connection pool
+│   │   └── env.ts          # Typed environment variables
+│   ├── lib/
+│   │   └── logger.ts       # Pino logger instance
+│   ├── metrics/
+│   │   └── metrics.ts      # In-memory metrics store
+│   ├── middleware/
+│   │   ├── auth.ts         # API key authentication
+│   │   └── error.ts        # Typed error classes + global error handler
+│   ├── modules/
+│   │   ├── pipeline/       # CRUD, toggle, per-pipeline metrics
+│   │   ├── webhook/        # Ingestion endpoint + event status
+│   │   ├── subscriber/     # Subscriber management per pipeline
+│   │   ├── delivery/       # Delivery history and manual retry
+│   │   └── metrics/        # GET /metrics route
+│   ├── queue/
+│   │   ├── boss.ts         # pg-boss instance
+│   │   └── worker.ts       # Job processor: action, delivery, retry, metrics
+│   ├── actions/            # One file per action type + shared interface
+│   └── utils/
+│       └── rateLimiter.ts  # In-memory token bucket rate limiter
+├── dashboard/              # React + Vite + Tailwind frontend
+│   └── src/
+│       ├── api.ts          # All fetch calls to the backend
+│       ├── App.tsx         # Router + sidebar layout
+│       ├── components/
+│       │   └── shared.tsx  # StatusBadge, PipelineTabs, groupBySubscriber, calcEventStatus
+│       └── pages/
+│           ├── Overview.tsx
+│           ├── Events.tsx
+│           └── Deliveries.tsx
+├── db/
+│   └── migrations/         # SQL migration files (run on startup)
+├── dockerfile
+├── docker-compose.yml
+└── docker-entrypoint.sh    # Runs migrations then starts the server
 ```
 
-Each module owns its controller, service, repository, routes, and types. No module reaches into another module's repository directly — cross-module data access goes through the service layer.
+Each backend module owns its controller, service, repository, routes, and types. No module accesses another module's repository directly.
 
 ---
 
@@ -86,21 +93,21 @@ Each module owns its controller, service, repository, routes, and types. No modu
 | Column         | Type      | Notes                                          |
 |----------------|-----------|------------------------------------------------|
 | id             | SERIAL    | Primary key                                    |
-| name           | TEXT      | Pipeline name                                  |
+| name           | TEXT      |                                                |
 | action_type    | TEXT      | Registered action identifier                   |
 | action_options | JSONB     | Action config (fields, secret, rate_limit)     |
-| enabled        | BOOLEAN   | Whether pipeline accepts events (default true) |
+| enabled        | BOOLEAN   | Default true                                   |
 | retry_limit    | INT       | Max delivery attempts (default 3)              |
 | timeout_ms     | INT       | HTTP timeout per attempt (default 5000ms)      |
 | created_at     | TIMESTAMP |                                                |
 
 ### `subscribers`
-| Column      | Type      | Notes           |
-|-------------|-----------|-----------------|
-| id          | SERIAL    | Primary key     |
-| pipeline_id | INT       | FK → pipelines  |
-| target_url  | TEXT      | Destination URL |
-| created_at  | TIMESTAMP |                 |
+| Column      | Type      | Notes          |
+|-------------|-----------|----------------|
+| id          | SERIAL    | Primary key    |
+| pipeline_id | INT       | FK → pipelines |
+| target_url  | TEXT      |                |
+| created_at  | TIMESTAMP |                |
 
 ### `events`
 | Column      | Type      | Notes                                 |
@@ -111,178 +118,142 @@ Each module owns its controller, service, repository, routes, and types. No modu
 | status      | TEXT      | queued / processed / skipped / failed |
 | result      | JSONB     | Output after action execution         |
 | created_at  | TIMESTAMP |                                       |
-| updated_at  | TIMESTAMP |                                       |
 
 ### `deliveries`
-| Column        | Type      | Notes                         |
-|---------------|-----------|-------------------------------|
-| id            | SERIAL    | Primary key                   |
-| event_id      | INT       | FK → events                   |
-| subscriber_id | INT       | FK → subscribers              |
-| status        | TEXT      | pending / success / failed    |
-| response_code | INT       | HTTP status from subscriber   |
-| response_body | TEXT      | Response body from subscriber |
-| attempt       | INT       | Attempt number (1-N)          |
-| last_attempt  | TIMESTAMP |                               |
+| Column        | Type      | Notes                       |
+|---------------|-----------|-----------------------------|
+| id            | SERIAL    | Primary key                 |
+| event_id      | INT       | FK → events                 |
+| subscriber_id | INT       | FK → subscribers            |
+| status        | TEXT      | pending / success / failed  |
+| response_code | INT       | HTTP status from subscriber |
+| response_body | TEXT      |                             |
+| attempt       | INT       | Attempt number (1-N)        |
+| last_attempt  | TIMESTAMP |                             |
 
 ---
 
 ## Error Handling
 
-Errors are typed and thrown from the service layer. A global error handler middleware in `error.ts` catches them and returns a consistent JSON response.
+Errors are typed and thrown from the service layer. A global handler in `error.ts` catches them and returns a consistent JSON response.
 
-```
-Controller → calls service
-Service    → throws typed error (NotFoundError, ValidationError, UnauthorizedError)
-Middleware → catches via next(err), returns { error: message } with correct status
-```
-
-Error classes:
-
-| Class               | Status | Default message    |
-|---------------------|--------|--------------------|
-| `AppError`          | 500    | base class         |
-| `NotFoundError`     | 404    | "Not found"        |
-| `ValidationError`   | 400    | "Validation error" |
-| `UnauthorizedError` | 401    | "Unauthorized"     |
-
-This avoids duplicated status-code logic across controllers. Controllers only call `next(err)` — they never decide the HTTP status themselves.
-
-All controllers follow this pattern consistently, including `webhook.controller.ts`.
+Controllers call the service layer and pass any error to `next(err)`. The service throws typed errors (`NotFoundError`, `ValidationError`, etc.). The global error handler in `error.ts` catches them and returns a consistent `{ error: message }` response with the correct status code. Controllers never set HTTP status directly.
 
 ---
 
 ## Technology Decisions
 
-### Authentication
-API key auth via `x-api-key` header. Configured via the `API_KEY` env var. If `API_KEY` is not set, the middleware passes all requests through — auth is opt-in. The webhook ingestion endpoint (`POST /webhooks/:pipelineId`) and `GET /health` are always public. All management endpoints require the key when set.
-
 ### Express over NestJS
-Express is minimal and gives full control over structure. NestJS enforces its own conventions and adds significant boilerplate — the overhead isn't justified at this scale.
-
-### PostgreSQL
-Handles both relational data (pipelines, subscribers) and schema-less data (event payloads, delivery responses) via JSONB. No need for a separate document store. It's also the backing store for pg-boss, keeping the infrastructure footprint small.
+Express gives full control with minimal overhead. NestJS adds conventions and boilerplate that aren't justified at this scale.
 
 ### pg-boss over Redis/BullMQ
-pg-boss runs entirely on PostgreSQL — no additional broker needed. Jobs are durable (survive restarts), visible in the same DB as application data, and the queue semantics (retry, dead letter, concurrency) are sufficient for this use case.
+Runs on PostgreSQL — no extra infrastructure. Jobs are durable and visible in the same DB as application data.
 
 ### Pino over Winston
-Pino is significantly faster than Winston because it does minimal work on the hot path — serialization is offloaded to a worker thread via `pino-pretty` in dev, and raw JSON is emitted in production with near-zero overhead. Winston is more configurable but that flexibility comes at a performance cost that isn't needed here. Pino is also the standard choice in the Fastify ecosystem and increasingly in Express projects that care about throughput — which aligns with a webhook platform that can process high event volumes.
+Faster on the hot path. Raw JSON in production, pino-pretty in development. Winston's extra configurability comes at a performance cost that isn't needed here.
 
-
-Built-in `timeout` support is the key reason. Without a timeout, a slow subscriber blocks the worker thread indefinitely. `fetch` in Node.js requires an `AbortController` and manual wiring — axios does it in one option.
+### axios over fetch
+Built-in `timeout` option. Without it, a slow subscriber blocks the worker indefinitely. `fetch` needs an `AbortController` for the same result.
 
 ### JSONB for payloads
-Webhook payloads are schema-less by nature. JSONB stores them without requiring a fixed schema, supports GIN indexing for future querying, and allows the application to work with the data as a plain object without any deserialization step.
+Webhook payloads have no fixed schema — every sender sends something different. JSONB stores them as-is without requiring a predefined structure, and keeps the door open for querying payload fields later.
 
 ### Worker in the same process as the API
-The background worker runs inside the same Node.js process as the Express server. For this scale, the overhead of a second container isn't justified. pg-boss handles concurrency and job locking at the DB level, so running the worker in-process is safe. Splitting it out would be the right call if the worker became CPU-bound or needed independent scaling.
-
-### Docker setup
-Multi-stage Dockerfile — the builder stage compiles TypeScript, the final stage copies only compiled output and production dependencies. A `docker-entrypoint.sh` runs migrations before starting the server, so `docker compose up --build` is the only command needed from scratch.
-
-### webhook.site for testing
-When the API runs inside Docker, `localhost` inside the container refers to the container itself — not the host machine. webhook.site is a public URL the container can reach without any networking workarounds, and provides a visual inspector for verifying delivered payloads.
+Instead of running the background worker as a separate service, it starts inside the same Node.js process as the API. This keeps the setup simple — one container, one process. It works safely because pg-boss uses DB-level locking to ensure jobs aren't picked up twice. The tradeoff: if the worker becomes heavy, it shares CPU with the API. At this scale that's not a concern.
 
 ---
 
 ## Action Design
 
-Actions implement a single interface: `execute(payload): Promise<any>`. They are stateless, have no dependencies, and are resolved by action type string at runtime via `getAction()`. Adding a new action means creating one file and registering it in `index.ts`.
+Actions implement a single interface: `execute(payload): Promise<any>`. Stateless, no dependencies, resolved by action type string at runtime via `getAction()`. Adding a new action = one file + one line in `index.ts`.
 
-`getAction()` throws a `ValidationError` for unknown action types — enforced at pipeline creation time, so invalid pipelines are rejected immediately.
+`getAction()` throws `ValidationError` for unknown types — invalid pipelines are rejected at creation time.
 
-### `addTimestamp`
-Appends `processedAt` (ISO timestamp) to the payload. Zero side effects, always succeeds.
-
-### `transformKeys`
-Renames payload fields using a `_keyMap` passed in the payload. The `_keyMap` key is stripped from the output. Solves a common real-world problem: systems that produce and consume webhooks often use different naming conventions.
-
-### `filter`
-Checks a single field condition (`_filter.field === _filter.value`). If the condition is not met, returns `{ skipped: true }` — the worker logs the reason and stops, no delivery is attempted. The `_filter` key is stripped from the forwarded payload when the condition passes.
-
-### `maskSensitive`
-Replaces known sensitive fields with `***` before delivery. Default masked fields: `password`, `token`, `secret`, `email`, `phone`, `ssn` (case-insensitive). Prevents credentials from being forwarded to subscriber URLs in plaintext. Customizable via `action_options.fields` and `action_options.mask`.
-
-### `addSignature`
-Appends a `timestamp` (ISO) and computes an HMAC-SHA256 signature over the full payload including the timestamp. The signature is stripped from the body and sent as an `X-Webhook-Signature` header — the standard pattern used by Stripe and GitHub. Subscribers verify the header to confirm authenticity. Secret is set via `action_options.secret` or falls back to the `WEBHOOK_SECRET` env var.
+| Action           | What it does |
+|------------------|--------------|
+| `addTimestamp`   | Appends `processedAt` (ISO) to the payload |
+| `transformKeys`  | Renames fields using `_keyMap` in the payload (stripped from output) |
+| `filter`         | Skips delivery if `_filter.field !== _filter.value` |
+| `maskSensitive`  | Replaces sensitive fields with `***` — default: password, token, secret, email, phone, ssn |
+| `addSignature`   | Computes HMAC-SHA256 over the payload, sends it as `X-Webhook-Signature` header |
 
 ---
 
 ## Logging
 
-All logging uses [pino](https://github.com/pinojs/pino) — a structured JSON logger. Every log line is a JSON object with consistent fields, making logs filterable and machine-readable.
+Uses [pino](https://github.com/pinojs/pino) — structured JSON logger. In development (`NODE_ENV=development`), pino-pretty formats logs for readability:
 
-```json
-{ "level": 30, "time": 1710000000000, "eventId": 42, "subscriberId": 3, "attempt": 1, "msg": "Event delivered" }
-{ "level": 40, "time": 1710000000000, "eventId": 42, "subscriberId": 3, "err": "ECONNREFUSED", "msg": "Delivery failed" }
+```
+[15:12:35] INFO: request completed
+    req: { "method": "POST", "url": "/webhooks/1" }
+    res: { "statusCode": 200 }
+    responseTime: 24
+
+[15:12:35] INFO: Event delivered
+    eventId: 42  subscriberId: 3  attempt: 1
+
+[15:12:36] WARN: Delivery failed
+    eventId: 42  subscriberId: 3  attempt: 2  err: "ECONNREFUSED"
 ```
 
-HTTP requests are logged automatically via `pino-http` middleware in `app.ts` — every request gets a log line with method, URL, status, and response time.
+In production, raw JSON is emitted for log aggregators (Datadog, Grafana, ELK). HTTP requests are logged automatically via `pino-http` middleware.
 
-In development (`NODE_ENV=development`), logs are formatted with `pino-pretty` for readability. In production, raw JSON is emitted for ingestion by log aggregators (Datadog, Grafana, ELK).
-
-Log levels used:
-- `info` — normal operations (server start, job start, delivery success)
-- `warn` — skipped events, rate limit hits, failed delivery attempts
-- `error` — unhandled errors, all delivery attempts exhausted
+Log levels: `info` (normal ops), `warn` (failures, skips, rate limits), `error` (unhandled errors, all retries exhausted).
 
 ---
 
+## Retry & Backoff
 
-
-Delivery is attempted up to `retry_limit` times per subscriber (default 3) with exponential backoff (`2000ms x attempt`). Both `retry_limit` and `timeout_ms` are configurable per pipeline at creation time. Every attempt — success or failure — is written to the `deliveries` table with the HTTP status code and response body.
-
-Retrying gives the subscriber a chance to recover from transient failures (deploys, timeouts, momentary overload). Exponential backoff avoids hammering an already-struggling endpoint.
+Delivery is attempted up to `retry_limit` times (default 3) with exponential backoff (`2000ms × attempt`). Every attempt is written to the `deliveries` table with status, HTTP code, and response body. Both `retry_limit` and `timeout_ms` are configurable per pipeline.
 
 ---
 
 ## Rate Limiting
 
-Per-subscriber rate limiting is configurable via `action_options.rate_limit` (`max` requests per `window_ms`). Implemented as an in-memory token bucket — no Redis needed. If a subscriber exceeds the limit within the window, the delivery is skipped and logged.
-
-This prevents a single slow or misbehaving subscriber from being hammered during high-volume event bursts.
+Per-subscriber, configurable via `action_options.rate_limit` (`max` requests per `window_ms`). In-memory token bucket — no Redis needed. Deliveries that exceed the limit are skipped and logged.
 
 ---
 
 ## Metrics
 
-Two levels:
+**System-wide** (`GET /metrics`) — in-memory, resets on restart:
+- `total_events`, `success_deliveries`, `failed_deliveries`, `retries`, `avg_response_time_ms`
 
-**System-wide** (`GET /metrics`) — in-memory counters tracked by the worker:
-- `total_events` — events picked up by the worker
-- `success_deliveries` — successful HTTP deliveries
-- `failed_deliveries` — failed delivery attempts
-- `retries` — retry attempts made
-- `avg_response_time_ms` — average delivery response time
-
-Resets on server restart. For production these would be persisted to a time-series store (Prometheus + Grafana).
-
-**Per-pipeline** (`GET /pipelines/:id/metrics`) — aggregated live from the DB:
-- `total_events` — events processed by this pipeline
-- `success` — successful deliveries
-- `failed` — failed deliveries
-- `avg_response_time_ms` — average time from event creation to delivery attempt
-
-Per-pipeline metrics are always accurate since they query the `events` and `deliveries` tables directly — no reset on restart.
+**Per-pipeline** (`GET /pipelines/:id/metrics`) — live from DB, persists across restarts:
+- `total_events`, `success`, `failed`, `avg_response_time_ms`
 
 ---
 
-## Trade-offs and Limitations
+## Dashboard
 
-- **Single action per pipeline** — supporting chained actions would require a `pipeline_steps` table and sequential execution.
-- **Inline action config** — `_keyMap` and `_filter` live in the payload, coupling config to the event. A dedicated config column per pipeline step would be cleaner for production.
-- **In-memory rate limiter** — resets on restart and does not work across multiple instances. Redis would be needed for distributed rate limiting.
-- **In-memory global metrics** — reset on restart. Production would use Prometheus or a time-series DB.
-- **No dead letter queue** — after max retries the delivery is marked failed and stays in the DB. A DLQ with alerting would be the production approach.
-- **No incoming signature verification** — HMAC-SHA256 validation on incoming requests would prevent spoofed events.
+React + Vite + Tailwind in `dashboard/`. Connects to the backend via Vite dev proxy (`/api` → `http://localhost:3000`).
 
+- **Overview** — metrics cards + pipeline table with toggle
+- **Events** — event list with status; click to inspect payload and per-subscriber delivery breakdown
+- **Deliveries** — grouped by event + subscriber, expandable attempt rows per session, retry button with polling
+
+Status is based on each subscriber's last attempt — not whether any attempt ever succeeded. Sessions are separated by attempt resets (each manual retry starts a new session).
 
 ---
 
-## What I'd Do Differently in Production
+## Design Trade-offs (Intentional Simplifications)
 
-- Validate incoming webhook signatures (HMAC-SHA256) to prevent spoofed events
-- Move failed deliveries to a dead letter queue after max retries
-- Use Redis for distributed rate limiting and persistent metrics
-- Add pipeline step chaining via a `pipeline_steps` table
+The system is intentionally designed with minimal infrastructure to keep the implementation simple and easy to reason about for a demo environment. The following trade-offs highlight what would change in a production-scale deployment.
+
+| Area | Current | Production approach |
+|------|---------|-------------------|
+| Actions | One action per pipeline | `pipeline_steps` table with ordered chaining |
+| Action config | `_keyMap` and `_filter` live in the payload — sender controls behavior | Config belongs in the pipeline definition |
+| Rate limiter | In-memory, resets on restart, single instance only | Redis for distributed limiting |
+| Global metrics | In-memory, resets on restart | Prometheus or a time-series DB |
+| Failed deliveries | Marked failed in DB, no alerting | Dead letter queue with alerting |
+| Inbound security | Signature verification omitted to reduce demo complexity | HMAC-SHA256 validation per pipeline |
+
+---
+
+## Production Evolution Roadmap
+
+- Verify inbound webhook signatures (HMAC-SHA256) to prevent spoofed events
+- Move permanently failed deliveries to a dead letter queue with alerting
+- Replace in-memory rate limiter and metrics with Redis + Prometheus
+- Support action chaining via a `pipeline_steps` table

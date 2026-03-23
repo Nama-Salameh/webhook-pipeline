@@ -32,6 +32,7 @@ Incoming webhook → queued as a job → worker processes it → delivers to sub
 - TypeScript + Express
 - PostgreSQL + pg-boss (job queue)
 - Pino (structured logging)
+- React + Vite + Tailwind (dashboard)
 - Docker + Docker Compose
 - GitHub Actions CI/CD
 
@@ -41,7 +42,7 @@ Incoming webhook → queued as a job → worker processes it → delivers to sub
 
 ### Prerequisites
 
-- Docker Desktop (or Docker Engine on Linux/WSL)
+- Docker Desktop, or Docker Engine on Linux/WSL (e.g. Ubuntu with `sudo apt install docker.io docker-compose-plugin`)
 
 ### Run with Docker
 
@@ -53,6 +54,8 @@ docker compose up --build
 ```
 
 Server runs on `http://localhost:3000`. Migrations run automatically on startup.
+
+Dashboard runs separately — see [dashboard/README.md](./dashboard/README.md).
 
 ### Local Development (without Docker)
 
@@ -68,14 +71,14 @@ npm run dev
 
 ## Environment Variables
 
-| Variable         | Description                          | Default                                               |
-|------------------|--------------------------------------|-------------------------------------------------------|
-| `PORT`           | Server port                          | `3000`                                                |
-| `DATABASE_URL`   | PostgreSQL connection URL            | `postgres://postgres:postgres@localhost:5432/webhook` |
-| `RUN_MIGRATIONS` | Run migrations on startup            | `true`                                                |
-| `API_KEY`        | API key for auth (optional)           | unset (auth disabled if not set)                      |
-| `WEBHOOK_SECRET` | HMAC secret for `addSignature` action | `default-secret`                                      |
-| `LOG_LEVEL`      | Pino log level                        | `info`                                                |
+| Variable         | Description                                    | Default (docker-compose)                              |
+|------------------|------------------------------------------------|-------------------------------------------------------|
+| `PORT`           | Server port                                    | `3000`                                                |
+| `DATABASE_URL`   | PostgreSQL connection URL                      | `postgres://postgres:postgres@postgres:5432/webhook`  |
+| `RUN_MIGRATIONS` | Run migrations on startup                      | `true`                                                |
+| `API_KEY`        | API key for auth — if unset, auth is disabled  | `webhook-secret-123`                                  |
+| `WEBHOOK_SECRET` | HMAC secret used by the `addSignature` action to sign outgoing webhook deliveries | `webhook-hmac-secret` |
+| `LOG_LEVEL`      | Pino log level                                 | `info`                                                |
 
 ---
 
@@ -83,11 +86,13 @@ npm run dev
 
 All endpoints except `POST /webhooks/:pipelineId` and `GET /health` require an `x-api-key` header.
 
-```bash
+```
 x-api-key: webhook-secret-123
 ```
 
-If `API_KEY` is not set in the environment, authentication is skipped entirely. The webhook ingestion endpoint is intentionally public — it must be reachable without credentials.
+If `API_KEY` is not set in the environment, authentication is skipped entirely.
+
+The webhook ingestion endpoint is intentionally public. Webhooks are sent by external systems (GitHub, Stripe, your own services) that authenticate via their own mechanism — requiring an API key would mean every external sender needs to know your internal key, which breaks the standard webhook model. Security on inbound webhooks is handled separately via signature verification (see Trade-offs).
 
 Unauthorized requests return:
 ```json
@@ -234,7 +239,7 @@ GET /events/:id/status
 → { event, status, attempts, deliveries }
 ```
 
-Returns the event, its computed status (`pending` / `success` / `failed`), and the full delivery history.
+Returns the event, its computed status (`pending` / `success` / `failed` / `partial`), and the full delivery history. Status is based on each subscriber's last delivery attempt — `partial` means some subscribers succeeded and some failed.
 
 ### Metrics
 
@@ -249,6 +254,14 @@ GET /metrics
     "avg_response_time_ms": 142
   }
 ```
+
+- `total_events` — webhooks received and picked up by the worker
+- `success_deliveries` — individual delivery attempts that got a 2xx response
+- `failed_deliveries` — individual delivery attempts that failed
+- `retries` — number of retry attempts made after an initial failure (not counting the first attempt)
+- `avg_response_time_ms` — average time to get a response from a subscriber URL
+
+Note: `success_deliveries + failed_deliveries` will be higher than `total_events` because each event is delivered to every subscriber, and each failed attempt is counted separately.
 
 Per-pipeline (live from DB, persists across restarts):
 ```
@@ -271,44 +284,243 @@ GET /pipelines/:id/metrics
 
 ---
 
-## End-to-End Example
+## Testing with Thunder Client
 
-**Get a free test URL:**
-1. Go to [webhook.site](https://webhook.site)
-2. Copy the unique URL — e.g. `https://webhook.site/a1b2c3d4-...`
-3. Use it as `target_url` — no signup needed
+Thunder Client is a VS Code extension for making HTTP requests (similar to Postman). Install it from the VS Code extensions panel, then use the examples below.
+
+Set this header on all requests except `POST /webhooks/:pipelineId`:
+```
+x-api-key: webhook-secret-123
+```
+
+### 1. Create a pipeline
+
+**POST** `http://localhost:3000/pipelines`
+
+Headers:
+```
+Content-Type: application/json
+x-api-key: webhook-secret-123
+```
+
+Body (pick one action type):
+
+```json
+{ "name": "Timestamp Pipeline", "action_type": "addTimestamp" }
+```
+```json
+{ "name": "Key Transform Pipeline", "action_type": "transformKeys" }
+```
+```json
+{ "name": "Filter Pipeline", "action_type": "filter" }
+```
+```json
+{
+  "name": "Mask Pipeline",
+  "action_type": "maskSensitive",
+  "action_options": { "fields": ["password", "token"], "mask": "XXXX" }
+}
+```
+```json
+{
+  "name": "Signature Pipeline",
+  "action_type": "addSignature",
+  "action_options": { "secret": "my-secret" }
+}
+```
+
+### 2. List pipelines
+
+**GET** `http://localhost:3000/pipelines`
+
+Headers:
+```
+x-api-key: webhook-secret-123
+```
+
+### 3. Update a pipeline
+
+**PUT** `http://localhost:3000/pipelines/1`
+
+Headers:
+```
+Content-Type: application/json
+x-api-key: webhook-secret-123
+```
+Body (all fields optional):
+```json
+{
+  "name": "Renamed Pipeline",
+  "action_options": { "fields": ["email"], "mask": "***" }
+}
+```
+
+### 4. Add a subscriber
+
+**POST** `http://localhost:3000/pipelines/1/subscribers`
+
+Headers:
+```
+Content-Type: application/json
+x-api-key: webhook-secret-123
+```
+Body:
+```json
+{ "target_url": "https://webhook.site/your-unique-id" }
+```
+
+Get a free test URL at [webhook.site](https://webhook.site) — no signup needed.
+
+### 5. Send a webhook (no auth header needed)
+
+**POST** `http://localhost:3000/webhooks/1`
+
+Header: `Content-Type: application/json` only.
+
+Body examples per action type:
+
+```json
+// addTimestamp — processedAt is appended
+{ "orderId": 123, "amount": 50 }
+
+// transformKeys — _keyMap renames fields, is stripped from output
+{ "orderId": 123, "_keyMap": { "orderId": "order_id" } }
+
+// filter — delivery skipped if field doesn't match value
+{ "status": "paid", "_filter": { "field": "status", "value": "paid" } }
+
+// maskSensitive — sensitive fields replaced with *** (or custom mask)
+{ "username": "john", "password": "secret123", "token": "abc" }
+
+// addSignature — X-Webhook-Signature header added to outgoing delivery
+{ "orderId": 123, "amount": 50 }
+```
+
+### 6. Check event status
+
+**GET** `http://localhost:3000/events/1/status`
+
+### 7. Check deliveries
+
+**GET** `http://localhost:3000/deliveries/pipeline/1`
+
+### 8. Retry a failed delivery
+
+**POST** `http://localhost:3000/deliveries/1/retry`
+
+### 9. Toggle a pipeline
+
+**PATCH** `http://localhost:3000/pipelines/1/toggle`
+
+### 10. Delete a pipeline
+
+**DELETE** `http://localhost:3000/pipelines/1`
+
+Returns `204 No Content`.
+
+### 11. Check metrics
+
+**GET** `http://localhost:3000/metrics`
+
+**GET** `http://localhost:3000/pipelines/1/metrics`
+
+---
+
+## curl Examples
 
 ```bash
-# 1. Create a pipeline
+# 1. Create a pipeline (pick one action type)
 curl -X POST http://localhost:3000/pipelines \
   -H "Content-Type: application/json" \
   -H "x-api-key: webhook-secret-123" \
-  -d '{"name": "Order Pipeline", "action_type": "addTimestamp"}'
+  -d '{"name": "Timestamp Pipeline", "action_type": "addTimestamp"}'
 
-# 2. Add a subscriber
+curl -X POST http://localhost:3000/pipelines \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: webhook-secret-123" \
+  -d '{"name": "Key Transform Pipeline", "action_type": "transformKeys"}'
+
+curl -X POST http://localhost:3000/pipelines \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: webhook-secret-123" \
+  -d '{"name": "Filter Pipeline", "action_type": "filter"}'
+
+curl -X POST http://localhost:3000/pipelines \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: webhook-secret-123" \
+  -d '{"name": "Mask Pipeline", "action_type": "maskSensitive", "action_options": {"fields": ["password", "token"], "mask": "XXXX"}}'
+
+curl -X POST http://localhost:3000/pipelines \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: webhook-secret-123" \
+  -d '{"name": "Signature Pipeline", "action_type": "addSignature", "action_options": {"secret": "my-secret"}}'
+
+# 2. List pipelines
+curl http://localhost:3000/pipelines \
+  -H "x-api-key: webhook-secret-123"
+
+# 3. Update a pipeline (all fields optional)
+curl -X PUT http://localhost:3000/pipelines/1 \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: webhook-secret-123" \
+  -d '{"name": "Renamed Pipeline", "action_options": {"fields": ["email"], "mask": "***"}}'
+
+# 4. Add a subscriber
 curl -X POST http://localhost:3000/pipelines/1/subscribers \
   -H "Content-Type: application/json" \
   -H "x-api-key: webhook-secret-123" \
   -d '{"target_url": "https://webhook.site/your-unique-id"}'
 
-# 3. Send a webhook (no auth needed)
+# 5. Send a webhook (no auth needed — body depends on action type)
+# addTimestamp
 curl -X POST http://localhost:3000/webhooks/1 \
   -H "Content-Type: application/json" \
-  -d '{"name": "test", "value": 123}'
+  -d '{"orderId": 123, "amount": 50}'
 
-# 4. Check event status
+# transformKeys
+curl -X POST http://localhost:3000/webhooks/1 \
+  -H "Content-Type: application/json" \
+  -d '{"orderId": 123, "_keyMap": {"orderId": "order_id"}}'
+
+# filter
+curl -X POST http://localhost:3000/webhooks/1 \
+  -H "Content-Type: application/json" \
+  -d '{"status": "paid", "_filter": {"field": "status", "value": "paid"}}'
+
+# maskSensitive
+curl -X POST http://localhost:3000/webhooks/1 \
+  -H "Content-Type: application/json" \
+  -d '{"username": "john", "password": "secret123", "token": "abc"}'
+
+# addSignature
+curl -X POST http://localhost:3000/webhooks/1 \
+  -H "Content-Type: application/json" \
+  -d '{"orderId": 123, "amount": 50}'
+
+# 6. Check event status
 curl http://localhost:3000/events/1/status \
   -H "x-api-key: webhook-secret-123"
 
-# 5. Check delivery history
+# 7. Check deliveries
 curl http://localhost:3000/deliveries/pipeline/1 \
   -H "x-api-key: webhook-secret-123"
 
-# 6. Check system metrics
+# 8. Retry a failed delivery
+curl -X POST http://localhost:3000/deliveries/1/retry \
+  -H "x-api-key: webhook-secret-123"
+
+# 9. Toggle a pipeline
+curl -X PATCH http://localhost:3000/pipelines/1/toggle \
+  -H "x-api-key: webhook-secret-123"
+
+# 10. Delete a pipeline
+curl -X DELETE http://localhost:3000/pipelines/1 \
+  -H "x-api-key: webhook-secret-123"
+
+# 11. Check metrics
 curl http://localhost:3000/metrics \
   -H "x-api-key: webhook-secret-123"
 
-# 7. Check pipeline metrics
 curl http://localhost:3000/pipelines/1/metrics \
   -H "x-api-key: webhook-secret-123"
 ```
