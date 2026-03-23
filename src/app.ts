@@ -1,5 +1,6 @@
-import express, { Request, Response, NextFunction } from "express";
+import express, { Request, Response } from "express";
 import cors from "cors";
+import { pinoHttp } from "pino-http";
 import pipelineRoutes from "./modules/pipeline/pipeline.routes.js";
 import webhookRoutes from "./modules/webhook/webhook.routes.js";
 import subscriberRoutes from "./modules/subscriber/subscriber.routes.js";
@@ -8,9 +9,11 @@ import eventRoutes from "./modules/webhook/event.routes.js";
 import metricsRoutes from "./modules/metrics/metrics.routes.js";
 import { requireApiKey } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/error.js";
+import { logger } from "./lib/logger.js";
 
 export const app = express();
 
+app.use(pinoHttp({ logger }));
 app.use(cors());
 app.use(express.json());
 

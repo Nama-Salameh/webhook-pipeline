@@ -51,6 +51,8 @@ src/
 │   └── env.ts              # Typed environment variables
 ├── metrics/
 │   └── metrics.ts          # In-memory metrics store (written by worker, read by API)
+├── lib/
+│   └── logger.ts           # Pino logger instance (shared across app and worker)
 ├── middleware/
 │   ├── auth.ts             # API key authentication middleware
 │   └── error.ts            # Typed error classes + global error handler
@@ -164,7 +166,10 @@ Handles both relational data (pipelines, subscribers) and schema-less data (even
 ### pg-boss over Redis/BullMQ
 pg-boss runs entirely on PostgreSQL — no additional broker needed. Jobs are durable (survive restarts), visible in the same DB as application data, and the queue semantics (retry, dead letter, concurrency) are sufficient for this use case.
 
-### axios for delivery
+### Pino over Winston
+Pino is significantly faster than Winston because it does minimal work on the hot path — serialization is offloaded to a worker thread via `pino-pretty` in dev, and raw JSON is emitted in production with near-zero overhead. Winston is more configurable but that flexibility comes at a performance cost that isn't needed here. Pino is also the standard choice in the Fastify ecosystem and increasingly in Express projects that care about throughput — which aligns with a webhook platform that can process high event volumes.
+
+
 Built-in `timeout` support is the key reason. Without a timeout, a slow subscriber blocks the worker thread indefinitely. `fetch` in Node.js requires an `AbortController` and manual wiring — axios does it in one option.
 
 ### JSONB for payloads
@@ -204,7 +209,27 @@ Appends a `timestamp` (ISO) and computes an HMAC-SHA256 signature over the full 
 
 ---
 
-## Retry Logic
+## Logging
+
+All logging uses [pino](https://github.com/pinojs/pino) — a structured JSON logger. Every log line is a JSON object with consistent fields, making logs filterable and machine-readable.
+
+```json
+{ "level": 30, "time": 1710000000000, "eventId": 42, "subscriberId": 3, "attempt": 1, "msg": "Event delivered" }
+{ "level": 40, "time": 1710000000000, "eventId": 42, "subscriberId": 3, "err": "ECONNREFUSED", "msg": "Delivery failed" }
+```
+
+HTTP requests are logged automatically via `pino-http` middleware in `app.ts` — every request gets a log line with method, URL, status, and response time.
+
+In development (`NODE_ENV=development`), logs are formatted with `pino-pretty` for readability. In production, raw JSON is emitted for ingestion by log aggregators (Datadog, Grafana, ELK).
+
+Log levels used:
+- `info` — normal operations (server start, job start, delivery success)
+- `warn` — skipped events, rate limit hits, failed delivery attempts
+- `error` — unhandled errors, all delivery attempts exhausted
+
+---
+
+
 
 Delivery is attempted up to `retry_limit` times per subscriber (default 3) with exponential backoff (`2000ms x attempt`). Both `retry_limit` and `timeout_ms` are configurable per pipeline at creation time. Every attempt — success or failure — is written to the `deliveries` table with the HTTP status code and response body.
 
@@ -260,5 +285,4 @@ Per-pipeline metrics are always accurate since they query the `events` and `deli
 - Validate incoming webhook signatures (HMAC-SHA256) to prevent spoofed events
 - Move failed deliveries to a dead letter queue after max retries
 - Use Redis for distributed rate limiting and persistent metrics
-- Add structured logging with pino
 - Add pipeline step chaining via a `pipeline_steps` table

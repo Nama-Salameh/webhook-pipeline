@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { logger } from "../lib/logger.js";
 
 export class AppError extends Error {
   constructor(public message: string, public status: number = 500) {
@@ -21,6 +22,6 @@ export class UnauthorizedError extends AppError {
 export const errorHandler = (err: any, _req: Request, res: Response, _next: NextFunction) => {
   const status = err.status ?? 500;
   const message = err.message ?? "Internal server error";
-  if (status === 500) console.error(err);
+  if (status === 500) logger.error({ err }, "Unhandled error");
   res.status(status).json({ error: message });
 };

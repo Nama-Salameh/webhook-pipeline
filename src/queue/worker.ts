@@ -7,6 +7,7 @@ import * as subscriberRepo from "../modules/subscriber/subscriber.repository.js"
 import axios from "axios";
 import { checkRateLimit } from "../utils/rateLimiter.js";
 import { recordEvent, recordSuccess, recordFailure, recordRetry } from "../metrics/metrics.js";
+import { logger } from "../lib/logger.js";
 
 export const startWorker = () => {
   boss.work("process_event", async (jobs: any[]) => {
@@ -20,7 +21,7 @@ export const startWorker = () => {
         const pipeline = await pipelineRepo.getPipelineById(event.pipeline_id);
         if (!pipeline) throw new Error(`Pipeline not found: ${event.pipeline_id}`);
         if (!pipeline.enabled) {
-          console.log(`Pipeline ${pipeline.id} is disabled, skipping event ${event.id}`);
+          logger.warn({ pipelineId: pipeline.id, eventId: event.id }, "Pipeline disabled, skipping event");
           continue;
         }
 
@@ -28,7 +29,7 @@ export const startWorker = () => {
         const result = await action.execute(event.payload);
 
         if (result && result.skipped) {
-          console.log(`Event ${event.id} skipped: ${result.reason}`);
+          logger.info({ eventId: event.id, reason: result.reason }, "Event skipped");
           continue;
         }
 
@@ -40,13 +41,13 @@ export const startWorker = () => {
         }
 
       } catch (err) {
-        console.error("Worker error:", err);
+        logger.error({ err }, "Worker error");
         throw err;
       }
     }
   });
 
-  console.log("Worker started for process_event jobs");
+  logger.info("Worker started for process_event jobs");
 };
 
 async function deliverToSubscribers(event: any, subscribers: any[], pipeline: any) {
@@ -58,7 +59,7 @@ async function deliverToSubscribers(event: any, subscribers: any[], pipeline: an
     if (rateLimit) {
       const allowed = checkRateLimit(`subscriber:${subscriber.id}`, rateLimit.max, rateLimit.window_ms);
       if (!allowed) {
-        console.log(`Rate limit hit for subscriber ${subscriber.id}, skipping event ${event.id}`);
+        logger.warn({ subscriberId: subscriber.id, eventId: event.id }, "Rate limit hit, skipping delivery");
         continue;
       }
     }
@@ -77,15 +78,16 @@ async function deliverToSubscribers(event: any, subscribers: any[], pipeline: an
         recordSuccess(Date.now() - start);
         await createDelivery(event.id, subscriber.id, "success", res.status, JSON.stringify(res.data), attempt);
         success = true;
-        console.log(`Delivered event ${event.id} to subscriber ${subscriber.id}`);
+        logger.info({ eventId: event.id, subscriberId: subscriber.id, attempt }, "Event delivered");
       } catch (err: any) {
         recordFailure();
         if (attempt < maxRetries) recordRetry();
         await createDelivery(event.id, subscriber.id, "failed", err.response?.status, err.message, attempt);
+        logger.warn({ eventId: event.id, subscriberId: subscriber.id, attempt, err: err.message }, "Delivery failed");
         attempt++;
         await new Promise(r => setTimeout(r, 2000 * attempt));
       }
 
-    if (!success) console.error(`Failed to deliver event ${event.id} to subscriber ${subscriber.id}`);
+    if (!success) logger.error({ eventId: event.id, subscriberId: subscriber.id }, "All delivery attempts failed");
   }
 }

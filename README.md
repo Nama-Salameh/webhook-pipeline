@@ -5,6 +5,8 @@
 ![Node](https://img.shields.io/badge/node-22-green?logo=node.js)
 ![TypeScript](https://img.shields.io/badge/typescript-5-blue?logo=typescript)
 ![PostgreSQL](https://img.shields.io/badge/postgresql-16-blue?logo=postgresql)
+![pino](https://img.shields.io/badge/logger-pino-green)
+![pg--boss](https://img.shields.io/badge/queue-pg--boss-blue)
 
 A service that receives webhooks, processes them through a job queue, and delivers results to registered subscriber URLs — a simplified Zapier-style pipeline engine.
 
@@ -29,6 +31,7 @@ Incoming webhook → queued as a job → worker processes it → delivers to sub
 
 - TypeScript + Express
 - PostgreSQL + pg-boss (job queue)
+- Pino (structured logging)
 - Docker + Docker Compose
 - GitHub Actions CI/CD
 
@@ -70,8 +73,9 @@ npm run dev
 | `PORT`           | Server port                          | `3000`                                                |
 | `DATABASE_URL`   | PostgreSQL connection URL            | `postgres://postgres:postgres@localhost:5432/webhook` |
 | `RUN_MIGRATIONS` | Run migrations on startup            | `true`                                                |
-| `API_KEY`        | API key for auth (optional)          | unset (auth disabled if not set)                      |
-| `WEBHOOK_SECRET` | HMAC secret for `addSignature` action | `default-secret`                                     |
+| `API_KEY`        | API key for auth (optional)           | unset (auth disabled if not set)                      |
+| `WEBHOOK_SECRET` | HMAC secret for `addSignature` action | `default-secret`                                      |
+| `LOG_LEVEL`      | Pino log level                        | `info`                                                |
 
 ---
 
