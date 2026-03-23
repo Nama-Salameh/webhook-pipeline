@@ -5,7 +5,8 @@ const headers = {
   'x-api-key': API_KEY,
 };
 
-const base = '/api';
+
+const base = import.meta.env.VITE_API_URL ?? '/api';
 
 export const getPipelines = () =>
   fetch(`${base}/pipelines`, { headers }).then(r => r.json());
