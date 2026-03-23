@@ -20,8 +20,17 @@ export const getEventStatus = async (eventId: number) => {
 
   const deliveries = await repo.getDeliveriesByEventId(eventId);
 
-  const successDelivery = deliveries.find(d => d.status === "success");
-  const status = successDelivery ? "success" : deliveries.some(d => d.status === "failed") ? "failed" : "pending";
+  const subIds = [...new Set(deliveries.map((d: any) => d.subscriber_id))];
+  const subStatuses = subIds.map(sid => {
+    const subDeliveries = deliveries
+      .filter((d: any) => d.subscriber_id === sid)
+      .sort((a: any, b: any) => new Date(a.last_attempt).getTime() - new Date(b.last_attempt).getTime());
+    return subDeliveries[subDeliveries.length - 1]?.status ?? "pending";
+  });
+
+  const status =
+    subStatuses.every(s => s === "success") ? "success" :
+    subStatuses.every(s => s === "failed")  ? "failed"  : "partial";
 
   return {
     event,
